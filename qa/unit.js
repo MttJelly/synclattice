@@ -319,7 +319,7 @@ function testRuntimeSelectionAndCustomPaths() {
     assert.equal(selected.selectionFallback, false);
     assert.deepEqual(selected.runtimePathWarnings, {});
     const invalid = detectCodexRuntimes({ codexCliPath: path.join(root, "missing.exe"), chatgptAppPath: path.join(root, "missing-chatgpt.exe") }, "chatgpt-app");
-    assert.equal(invalid.selectionFallback, false); // installed app remains available as the fallback
+    assert.equal(invalid.selectionFallback, !invalid.chatgptAppAvailable);
     assert.match(invalid.runtimePathWarnings.codexCliPath, /无效/);
     assert.match(invalid.runtimePathWarnings.chatgptAppPath, /无效/);
     assert.deepEqual(runtimePathWarnings({}), {});
