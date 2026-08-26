@@ -1,7 +1,7 @@
 {
   "name": "chatswitch",
   "productName": "ChatSwitch",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "author": "ChatSwitch",
   "private": true,
   "description": "ChatSwitch: a multi-account, multi-provider desktop client for shared conversation context.",

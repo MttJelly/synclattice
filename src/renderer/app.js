@@ -3219,6 +3219,7 @@ function ensureMessageActions(node, role) {
     const quoted = String(node.dataset.rawText || "").slice(0, 4000).split("\n").map((line) => `> ${line}`).join("\n");
     composerInsert(quoted);
   });
+  addAction("git-branch", "分支到新聊天", () => branchFromMessage(node));
   if (role === "user") {
     addAction("pencil", "编辑并重新发送", () => {
       if (state.runningThreads.has(state.activeThread?.id)) requestTurnInterrupt();
@@ -3257,6 +3258,43 @@ function ensureMessageActions(node, role) {
   }
   node.querySelector(".message-column")?.appendChild(actions);
   if (!state.renderTarget) refreshIcons();
+}
+
+async function branchFromMessage(node) {
+  const threadId = state.activeThread?.id;
+  const messageId = String(node?.dataset.messageId || "").trim();
+  const sourceTitle = titleOf(state.activeThread);
+  if (!threadId || !messageId) {
+    showDiagnostic("未找到可以创建分支的消息。", true);
+    return;
+  }
+  const button = [...node.querySelectorAll(".message-action-button")]
+    .find((candidate) => candidate.getAttribute("aria-label") === "分支到新聊天");
+  if (button?.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.title = "正在创建分支…";
+    button.setAttribute("aria-label", button.title);
+  }
+  try {
+    const result = await api.branchThread({ threadId, messageId });
+    await loadThreads();
+    const branch = [...state.activeThreads, ...state.archivedThreads]
+      .find((item) => item.id === result.thread?.id) || result.thread;
+    if (!branch?.id) throw new Error("分支已创建，但没有返回新的会话。 ");
+    await openThread(branch);
+    showDiagnostic(`已从“${sourceTitle}”创建新聊天分支。原会话保持不变。`, false);
+  } catch (error) {
+    showActionError(error);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.title = "分支到新聊天";
+      button.setAttribute("aria-label", button.title);
+    }
+  }
 }
 
 function appendMessage(role, text, id = crypto.randomUUID(), phase = null, sourceLabel = null, streaming = false) {

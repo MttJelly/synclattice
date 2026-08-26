@@ -480,6 +480,54 @@ class OpenAICompatibleServer extends EventEmitter {
     return { imported: true, duplicate: false, thread: imported };
   }
 
+  createBranchThread(sourceThread, messageId) {
+    const source = sourceThread && typeof sourceThread === "object" ? sourceThread : null;
+    const selectedId = String(messageId || "").trim();
+    if (!source?.id || !selectedId) throw new Error("分支会话参数无效。");
+    const turns = [];
+    let selected = false;
+    for (const originalTurn of Array.isArray(source.turns) ? source.turns : []) {
+      const items = [];
+      for (const item of Array.isArray(originalTurn.items) ? originalTurn.items : []) {
+        items.push(structuredClone(item));
+        if (String(item?.id || "") === selectedId) {
+          selected = true;
+          break;
+        }
+      }
+      if (items.length) turns.push({ ...structuredClone(originalTurn), items, status: "completed" });
+      if (selected) break;
+    }
+    if (!selected || !turns.length) throw new Error("未找到可以创建分支的消息。");
+    const id = `branch-${crypto.randomUUID().replaceAll("-", "")}`;
+    const now = Math.floor(Date.now() / 1000);
+    const firstUserText = turns.flatMap((turn) => turn.items || [])
+      .find((item) => item?.type === "userMessage")?.content?.find((part) => part?.type === "text")?.text || "";
+    const sourceTitle = String(source.name || source.preview || "新会话").trim() || "新会话";
+    const branch = {
+      ...structuredClone(source),
+      id,
+      name: `${sourceTitle} · 分支`,
+      preview: String(firstUserText || source.preview || sourceTitle).split(/\r?\n/)[0].slice(0, 160),
+      modelProvider: "chatswitch-branch",
+      createdAt: Number(source.createdAt) || now,
+      updatedAt: now,
+      recencyAt: now,
+      turns,
+      _historyEngine: "openai-compatible",
+      _crossModelReadOnly: false,
+      _branch: {
+        parentThreadId: source.id,
+        parentMessageId: selectedId,
+        parentTitle: sourceTitle,
+        createdAt: now,
+        sourceModelProvider: source.modelProvider || null,
+      },
+    };
+    this.saveThread(branch);
+    return { imported: true, duplicate: false, thread: this.summary(branch) };
+  }
+
   summary(thread) {
     return {
       id: thread.id,
@@ -494,6 +542,7 @@ class OpenAICompatibleServer extends EventEmitter {
       turns: [],
       _syncedFromCodex: Boolean(thread._syncedFromCodex),
       _importedLocalHistory: thread._importedLocalHistory || null,
+      _branch: thread._branch || null,
       _historyEngine: "openai-compatible",
     };
   }

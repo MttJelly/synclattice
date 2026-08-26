@@ -2,6 +2,14 @@
 
 本文件记录 ChatSwitch 每个版本的用户可见变化。版本号遵循语义化版本；每次向 GitHub 推送产品更新前，必须先更新版本号和本文件。
 
+## [0.1.20] - 2026-08-26
+
+### 新增
+
+- 增加“分支到新聊天”：从任意用户或助手消息创建独立会话，复制选中消息之前的上下文，原会话保持不变。
+- 新分支首次发送时沿用现有跨模型分支机制，可继续使用官方账号、Claude Code 或任意中转模型。
+- 消息操作栏新增可访问的分支按钮，并覆盖独立会话持久化、原会话保护和多窗口回归测试。
+
 ## [0.1.19] - 2026-08-26
 
 ### 新增
@@ -285,3 +293,4 @@
 [0.1.17]: https://github.com/MttJelly/chatswitch/compare/v0.1.16...v0.1.17
 [0.1.18]: https://github.com/MttJelly/chatswitch/compare/v0.1.17...v0.1.18
 [0.1.19]: https://github.com/MttJelly/chatswitch/compare/v0.1.18...v0.1.19
+[0.1.20]: https://github.com/MttJelly/chatswitch/compare/v0.1.19...v0.1.20

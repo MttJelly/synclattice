@@ -3585,6 +3585,16 @@ app.whenReady().then(async () => {
       return rendererThreadWindow(await sharedReadThread(server, payload.threadId));
     }
   });
+  handleRendererIpc("thread:branch", async (event, payload) => {
+    const server = serverFor(event);
+    const threadId = String(payload?.threadId || "").trim();
+    const messageId = String(payload?.messageId || "").trim();
+    if (!threadId || !messageId) throw new Error("请选择要分支的消息。");
+    const source = await sharedReadThread(server, threadId);
+    const result = sharedHistoryReaders().compatible.createBranchThread(source.thread, messageId);
+    broadcastStoreSnapshot();
+    return result;
+  });
   handleRendererIpc("codex:start-thread", async (event, payload) => {
     const server = serverFor(event);
     const result = await server.startThread(

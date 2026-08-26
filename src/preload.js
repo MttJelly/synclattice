@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld("chatSwitch", {
   hideThread: (input) => ipcRenderer.invoke("thread:hide", input),
   restoreThread: (threadId) => ipcRenderer.invoke("thread:restore", threadId),
   deleteThreadNow: (threadId) => ipcRenderer.invoke("thread:delete-now", threadId),
+  branchThread: (input) => invokeRendererIpc("thread:branch", input),
   exportThread: (input) => ipcRenderer.invoke("thread:export", input),
   saveMessageQueue: (input) => ipcRenderer.invoke("thread:save-message-queue", input),
   claimMessageQueue: (input) => ipcRenderer.invoke("thread:claim-message-queue", input),

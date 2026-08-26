@@ -1857,6 +1857,19 @@ async function testImportedLocalConversation() {
     assert.deepEqual((await server.readThread(converted.id)).thread.turns[0].items.map((item) => item.type), [
       "userMessage", "reasoning", "agentMessage",
     ]);
+    const branch = server.createBranchThread(
+      (await server.readThread(converted.id)).thread,
+      `${converted.id}-item-2`,
+    );
+    assert.equal(branch.imported, true);
+    assert.equal(branch.duplicate, false);
+    assert.match(branch.thread.id, /^branch-[a-f0-9]{32}$/);
+    assert.equal(branch.thread.name, "共享记录迭代 · 分支");
+    const branchThread = server.loadThread(branch.thread.id);
+    assert.equal(branchThread._branch.parentThreadId, converted.id);
+    assert.equal(branchThread._branch.parentMessageId, `${converted.id}-item-2`);
+    assert.deepEqual(branchThread.turns[0].items.map((item) => item.type), ["userMessage", "reasoning"]);
+    assert.equal((await server.readThread(converted.id)).thread.turns[0].items.length, 3);
 
     const continued = server.loadThread(converted.id);
     continued.turns.push({
@@ -1891,7 +1904,7 @@ async function testImportedLocalConversation() {
     assert.equal(second.imported, true);
     assert.equal(second.duplicate, false);
     assert.notEqual(second.thread.id, converted.id);
-    assert.equal((await server.listLocalThreads()).data.length, 2);
+    assert.equal((await server.listLocalThreads()).data.length, 3);
     assert.throws(() => importedLocalThread({ id: "empty", messages: [] }), /没有可复制的消息/);
     server.stop();
   } finally {

@@ -176,6 +176,7 @@ async function run() {
   let clipboardPasteRequests = 0;
   let pendingSteerResolve = null;
   let importedLocalHistoryThread = null;
+  let branchedThread = null;
   let accountStatusRequests = 0;
   let officialLoginRequests = 0;
   const officialLoginProviderIds = [];
@@ -358,7 +359,7 @@ async function run() {
     };
   });
   ipcMain.handle("codex:list", () => ({
-    data: importedLocalHistoryThread ? [structuredClone(importedLocalHistoryThread)] : [],
+    data: [importedLocalHistoryThread, branchedThread].filter(Boolean).map((thread) => structuredClone(thread)),
     nextCursor: null,
   }));
   ipcMain.handle("codex:list-local", () => ({
@@ -389,8 +390,29 @@ async function run() {
   ipcMain.handle("codex:resume", (_event, input) => ({
     thread: input.threadId === importedLocalHistoryThread?.id
       ? { ...structuredClone(importedLocalHistoryThread), turns: [] }
+      : input.threadId === branchedThread?.id
+        ? structuredClone(branchedThread)
       : { id: input.threadId, name: "界面优化讨论", cwd: "F:\\codepro", turns: [] },
   }));
+  ipcMain.handle("thread:branch", (_event, input) => {
+    branchedThread = {
+      id: "branch-vue-fixture",
+      name: "界面优化讨论 · 分支",
+      cwd: "F:\\codepro",
+      model: "deepseek-chat",
+      _historyEngine: "openai-compatible",
+      turns: [{
+        id: "branch-turn-1",
+        status: "completed",
+        items: [
+          { id: "branch-user-1", type: "userMessage", content: [{ type: "text", text: "请分析当前界面，并给出可以立即实施的改进。" }] },
+          { id: "branch-reasoning-1", type: "reasoning", summary: [{ type: "summary_text", text: "先检查信息层级。" }] },
+          { id: "branch-agent-1", type: "agentMessage", text: "方案 A", phase: "final_answer" },
+        ],
+      }],
+    };
+    return { imported: true, duplicate: false, thread: { ...structuredClone(branchedThread), turns: [] } };
+  });
   ipcMain.handle("codex:start-turn", (_event, input) => {
     startTurnRequests.push(structuredClone(input));
     return { turn: { id: "unexpected-reconnect-turn" } };
@@ -1112,10 +1134,32 @@ async function run() {
     document.querySelector('#thread-search').value = '克制的提示';
     scheduleThreadSearch();
     await new Promise((resolve) => setTimeout(resolve, 340));
+    const originalThread = state.activeThread;
+    const originalThreads = state.activeThreads;
+    const originalAllThreads = state.allThreads;
+    const originalVisibleThreads = state.threads;
+    const branchButtonVisible = Boolean(agent.querySelector('[title="分支到新聊天"]'));
+    agent.querySelector('[title="分支到新聊天"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const branchCreated = state.activeThread?.id === 'branch-vue-fixture'
+      && state.activeThread?.name === '界面优化讨论 · 分支';
+    const branchOriginalPreserved = originalThread?.id === 'vue-conversation-fixture'
+      && originalThreads.some((thread) => thread.id === originalThread.id);
+    state.activeThread = originalThread;
+    state.activeThreads = originalThreads;
+    state.allThreads = originalAllThreads;
+    state.threads = originalVisibleThreads;
+    state.renderedThreadRevision = null;
+    renderConversation(originalThread);
+    state.runningThreads.set(originalThread.id, { turnId: 'turn-running', stopRequested: false, interruptingTurnId: null, startedAt: Date.now() });
+    syncActiveRunState();
     return {
       actionButtons: document.querySelectorAll('.message-action-button').length,
       agentActions: agent.querySelectorAll('.message-action-button').length,
       userActions: user.querySelectorAll('.message-action-button').length,
+      branchButtonVisible,
+      branchCreated,
+      branchOriginalPreserved,
       quotedText,
       editedText,
       stopRequestedByEdit,
@@ -1898,9 +1942,12 @@ async function run() {
   assert.equal(confirmation.neutralTone, true);
   assert.equal(confirmation.nativeConfirmCalls, 0);
   assert.equal(confirmation.hiddenAfterDecision, true);
-  assert.equal(messageFeatures.actionButtons, 6);
-  assert.equal(messageFeatures.agentActions, 3);
-  assert.equal(messageFeatures.userActions, 3);
+  assert.equal(messageFeatures.actionButtons, 8);
+  assert.equal(messageFeatures.agentActions, 4);
+  assert.equal(messageFeatures.userActions, 4);
+  assert.equal(messageFeatures.branchButtonVisible, true);
+  assert.equal(messageFeatures.branchCreated, true);
+  assert.equal(messageFeatures.branchOriginalPreserved, true);
   assert.match(messageFeatures.copiedText, /优化重点/);
   assert.match(messageFeatures.quotedText, /^回复完成后继续处理下一条消息/);
   assert.match(messageFeatures.quotedText, /> 请分析当前界面/);
