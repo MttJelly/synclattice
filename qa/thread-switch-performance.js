@@ -245,7 +245,7 @@ async function run() {
   assert.ok(streaming.reasoningTextLength >= 6000);
   assert.ok(streaming.rawTextAttributeWrites <= 1, `Streaming rewrote cumulative DOM text ${streaming.rawTextAttributeWrites} times.`);
   assert.equal(streaming.actionsWhileStreaming, 0);
-  assert.equal(streaming.actionsAfterCompletion, 3);
+  assert.equal(streaming.actionsAfterCompletion, 4);
   assert.equal(streaming.streamingAfterCompletion, false);
   assert.equal(streaming.composerValue, "typing while streaming 299");
   assert.ok(streaming.bottomScrollTop > 0, "The synthetic conversation was not scrollable.");
