@@ -8,9 +8,9 @@ release-build-*/
 # Bundled at build time from an installed Codex runtime
 build/codex-runtime/
 
-# Synclattice private runtime data
-share-master-data/
-share-master-profile/
+# ChatSwitch private runtime data and pre-migration profiles
+*-data/
+*-profile*/
 
 # QA runtime profiles, stores, schemas, and screenshots
 qa/.*/

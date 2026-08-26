@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, "..");
 const store = path.join(__dirname, ".deep-link-store");
 const profile = path.join(__dirname, ".deep-link-profile");
 const screenshot = path.join(__dirname, "multi-window-artifacts", "deep-link-import.png");
-const link = "synclattice://import?type=provider&label=Deep%20Link%20QA&baseUrl=https%3A%2F%2Fapi.example.test%2Fv1&model=qa-model&preset=custom";
+const link = "chatswitch://import?type=provider&label=Deep%20Link%20QA&baseUrl=https%3A%2F%2Fapi.example.test%2Fv1&model=qa-model&preset=custom";
 
 fs.rmSync(store, { recursive: true, force: true });
 fs.rmSync(profile, { recursive: true, force: true });
@@ -19,9 +19,9 @@ const result = spawnSync(electron, [`--user-data-dir=${profile}`, root, link], {
   windowsHide: true,
   env: {
     ...process.env,
-    SHARE_MASTER_STORE_ROOT: store,
-    CODEX_DECK_QA_SCREENSHOT: screenshot,
-    CODEX_DECK_QA_DELAY: "4500",
+    CHATSWITCH_STORE_ROOT: store,
+    CHATSWITCH_QA_SCREENSHOT: screenshot,
+    CHATSWITCH_QA_DELAY: "4500",
   },
 });
 

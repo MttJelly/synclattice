@@ -1,5 +1,5 @@
 const { EventEmitter } = require("node:events");
-const { spawn } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -8,12 +8,43 @@ const readline = require("node:readline");
 const { findExecutable, userExecutableCandidates } = require("./cli-discovery");
 
 const CLAUDE_EXE = findExecutable({
-  override: process.env.SHARE_MASTER_CLAUDE_EXE,
+  override: process.env.CHATSWITCH_CLAUDE_EXE,
   candidates: userExecutableCandidates("claude"),
   commands: ["claude.exe", "claude"],
   winget: { packagePrefix: "Anthropic.ClaudeCode_", executable: "claude.exe" },
 });
-const ISOLATED_STORE = Boolean(process.env.SHARE_MASTER_STORE_ROOT);
+const ISOLATED_STORE = Boolean(process.env.CHATSWITCH_STORE_ROOT);
+
+function claudeAuthEnvironment(configDir) {
+  return {
+    ...process.env,
+    ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}),
+  };
+}
+
+function claudeAuthStatus(configDir) {
+  if (!CLAUDE_EXE || !fs.existsSync(CLAUDE_EXE)) {
+    throw new Error("未找到 Claude Code CLI。请先安装 Claude Code。");
+  }
+  return new Promise((resolve, reject) => {
+    execFile(CLAUDE_EXE, ["auth", "status", "--json"], {
+      env: claudeAuthEnvironment(configDir),
+      windowsHide: true,
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout) => {
+      if (error) {
+        reject(new Error("无法读取 Claude Code 登录状态，请重试。"));
+        return;
+      }
+      try {
+        resolve(JSON.parse(String(stdout || "{}")));
+      } catch {
+        reject(new Error("Claude Code 返回了无法识别的登录状态。"));
+      }
+    });
+  });
+}
 
 function readJsonLines(file) {
   const records = [];
@@ -114,7 +145,7 @@ class ClaudeServer extends EventEmitter {
     this.configDir = provider.claudeConfigDir;
     this.localProjectsRoot = path.join(this.configDir, "projects");
     this.globalProjectsRoot = ISOLATED_STORE ? null : path.join(os.homedir(), ".claude", "projects");
-    this.namesFile = path.join(this.configDir, "share-master-thread-names.json");
+    this.namesFile = path.join(this.configDir, "chatswitch-thread-names.json");
     this.settingsFile = null;
   }
 
@@ -122,8 +153,13 @@ class ClaudeServer extends EventEmitter {
     if (!CLAUDE_EXE || !fs.existsSync(CLAUDE_EXE)) {
       throw new Error("未找到 Claude Code CLI。请先安装 Claude Code，并确保 claude 命令已加入 PATH。");
     }
-    if (!this.provider.env?.[this.provider.envKey]) throw new Error(`${this.provider.envKey} 未配置。`);
     fs.mkdirSync(this.configDir, { recursive: true });
+    if (this.provider.authMode === "oauth") {
+      const status = await claudeAuthStatus(this.configDir);
+      if (!status?.loggedIn) throw new Error("尚未登录 Claude Code 官方账号，请先完成 Anthropic 官方登录。");
+    } else if (!this.provider.env?.[this.provider.envKey]) {
+      throw new Error(`${this.provider.envKey} 未配置。`);
+    }
     if (new URL(this.provider.baseUrl).hostname.toLowerCase() === "ai.hexuan.cc") {
       if (ISOLATED_STORE) {
         throw new Error("隔离模式不会读取用户级 Claude 设置。");
@@ -404,11 +440,12 @@ class ClaudeServer extends EventEmitter {
     const env = {
       ...process.env,
       ANTHROPIC_BASE_URL: this.provider.baseUrl,
-      ANTHROPIC_AUTH_TOKEN: this.provider.env[this.provider.envKey],
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       CLAUDE_CODE_ATTRIBUTION_HEADER: "0",
       CLAUDE_CONFIG_DIR: this.configDir,
     };
+    const authToken = this.provider.env?.[this.provider.envKey];
+    if (authToken) env.ANTHROPIC_AUTH_TOKEN = authToken;
     const processHandle = spawn(CLAUDE_EXE, args, {
       cwd: cwd || process.cwd(),
       env,
@@ -557,4 +594,4 @@ class ClaudeServer extends EventEmitter {
   }
 }
 
-module.exports = { ClaudeServer, CLAUDE_EXE, claudePermissionArgs, readJsonLines };
+module.exports = { ClaudeServer, CLAUDE_EXE, claudeAuthEnvironment, claudeAuthStatus, claudePermissionArgs, readJsonLines };

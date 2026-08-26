@@ -46,14 +46,14 @@ const result = spawnSync(electron, [
   windowsHide: true,
   env: {
     ...process.env,
-    SHARE_MASTER_QA: "1",
-    CODEX_DECK_QA_OFFICIAL_AUTHENTICATED: "1",
-    CODEX_DECK_QA_PROVIDER: "official",
-    CODEX_DECK_QA_MULTI_PROVIDER: "1",
-    CODEX_DECK_QA_OUTPUT_DIR: outputDirectory,
-    SHARE_MASTER_STORE_ROOT: storeDirectory,
-    SHARE_MASTER_SKILL_SOURCES: emptySkillDirectory,
-    CODEX_DECK_QA_HEXUAN_TOKEN: "qa-placeholder-not-a-secret",
+    CHATSWITCH_QA: "1",
+    CHATSWITCH_QA_OFFICIAL_AUTHENTICATED: "1",
+    CHATSWITCH_QA_PROVIDER: "official",
+    CHATSWITCH_QA_MULTI_PROVIDER: "1",
+    CHATSWITCH_QA_OUTPUT_DIR: outputDirectory,
+    CHATSWITCH_STORE_ROOT: storeDirectory,
+    CHATSWITCH_SKILL_SOURCES: emptySkillDirectory,
+    CHATSWITCH_QA_HEXUAN_TOKEN: "qa-placeholder-not-a-secret",
   },
 });
 
@@ -64,7 +64,7 @@ assert.doesNotMatch(result.stderr, /Error occurred in handler/);
 const line = result.stdout.split(/\r?\n/).find((value) => value.startsWith('{"ok":true'));
 if (!line) throw new Error(`Multi-window result was not found.\n${result.stdout}\n${result.stderr}`);
 const summary = JSON.parse(line);
-assert.equal(summary.appUserModelId, "com.synclattice.desktop.dev");
+assert.equal(summary.appUserModelId, "com.chatswitch.desktop.dev");
 assert.equal(summary.runtimeIconAvailable, true);
 assert.equal(summary.windowCount, 2);
 assert.equal(summary.serverCount, 2);
@@ -72,9 +72,9 @@ assert.equal(summary.providerReturn, true);
 assert.equal(summary.claudeConfigurationReturn, true);
 assert.equal(summary.recordHomeReturn, true);
 assert.equal(summary.projectConfigurationReturn, true);
-assert.match(summary.unavailableProviderError, /NIUBI_API_KEY 未配置/);
+assert.match(summary.unavailableProviderError, /尚未配置可用的 API Key/);
 assert.equal(summary.unavailableCredentialVisible, true);
-assert.match(summary.unavailableConnection, /未连接/);
+assert.match(summary.unavailableConnection, /已连接/);
 assert.deepEqual(summary.internalProviders, ["official", "hexuan"]);
 assert.equal(summary.windows[0].providerName, "OpenAI 官方");
 assert.equal(summary.windows[1].providerName, "Hexuan");

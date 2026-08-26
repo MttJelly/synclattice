@@ -6,10 +6,16 @@ const { safeStorage } = require("electron");
 const { CODEX_HOME, BASE_PROVIDERS } = require("./codex-server");
 
 // Keep the legacy directory so existing providers, projects, and hidden-thread state remain available.
-const STORE_ROOT = process.env.SHARE_MASTER_STORE_ROOT || path.join(CODEX_HOME, "codex-deck");
+const STORE_ROOT = process.env.CHATSWITCH_STORE_ROOT || path.join(CODEX_HOME, "chatswitch");
 const METADATA_FILE = path.join(STORE_ROOT, "providers.json");
 const SECRETS_FILE = path.join(STORE_ROOT, "credentials.json");
-const ISOLATED_STORE = Boolean(process.env.SHARE_MASTER_STORE_ROOT);
+const CONFIG_SCHEMA = "chatswitch-config";
+const LEGACY_CONFIG_SCHEMAS = new Set([CONFIG_SCHEMA, "share-master-config"]);
+const BACKUP_SCHEMA = "chatswitch-backup";
+const LEGACY_BACKUP_SCHEMAS = new Set([BACKUP_SCHEMA, "share-master-backup"]);
+const SYNC_FILE_NAME = "chatswitch-sync.json";
+const LEGACY_SYNC_FILE_NAME = "share-master-sync.json";
+const ISOLATED_STORE = Boolean(process.env.CHATSWITCH_STORE_ROOT);
 const DEFAULT_CONVERSATION_HOME = ISOLATED_STORE
   ? path.join(STORE_ROOT, "conversations")
   : CODEX_HOME;
@@ -28,7 +34,7 @@ function readJson(file, fallback) {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
     if (error.code === "ENOENT") return fallback;
-    throw new Error(`无法读取 Synclattice 配置 ${file}：${error.message}`);
+    throw new Error(`无法读取 ChatSwitch 配置 ${file}：${error.message}`);
   }
 }
 
@@ -121,6 +127,12 @@ function claudeVendorLabel(baseUrl) {
 
 function providerBrand(provider) {
   return provider.type === "claude" || provider.engine === "claude" ? "claude" : "openai";
+}
+
+function providerApiKey(provider = {}, environment = {}) {
+  const keyName = provider.envKey;
+  if (keyName) return provider.env?.[keyName] || environment[keyName] || provider.apiKey || null;
+  return provider.apiKey || Object.values(provider.env || {})[0] || null;
 }
 
 const PROVIDER_PRESETS = {
@@ -589,7 +601,7 @@ function reasoningProfile(model) {
 
 function providerModelCatalog(id, model, availableModels = [model]) {
   const source = readJson(path.join(__dirname, "model-catalog.json"), { models: [] });
-  if (!source.models?.length) throw new Error("Synclattice 模型目录不可用。");
+  if (!source.models?.length) throw new Error("ChatSwitch 模型目录不可用。");
   const catalog = structuredClone(source);
   const models = [...new Set([model, ...availableModels].map((item) => String(item || "").trim()).filter(Boolean))];
   catalog.models = models.map((slug, index) => {
@@ -629,7 +641,7 @@ class ProviderStore {
     fs.mkdirSync(DEFAULT_CONVERSATION_HOME, { recursive: true });
     // Development builds retain the legacy migration path; packaged installs
     // must never copy credentials from an external Codex profile on first run.
-    if (!ISOLATED_STORE && process.env.SHARE_MASTER_PACKAGED !== "1") seedOfficialCredentials();
+    if (!ISOLATED_STORE && process.env.CHATSWITCH_PACKAGED !== "1") seedOfficialCredentials();
     const metadata = this.metadata();
     let changed = false;
     if (ISOLATED_STORE && metadata.conversationHome.toLowerCase() === CODEX_HOME.toLowerCase()) {
@@ -695,6 +707,9 @@ class ProviderStore {
       threadAliases: value.threadAliases && typeof value.threadAliases === "object"
         ? value.threadAliases
         : {},
+      threadDecorations: value.threadDecorations && typeof value.threadDecorations === "object"
+        ? value.threadDecorations
+        : {},
       threadBranches: value.threadBranches && typeof value.threadBranches === "object"
         ? value.threadBranches
         : {},
@@ -745,8 +760,8 @@ class ProviderStore {
     const configuredBuiltin = (id) => (id === "official"
       ? Boolean(secrets[`builtin:${id}`]) || metadata.providerOrder.includes(id)
         || (fs.existsSync(METADATA_FILE) && fs.existsSync(path.join(CODEX_HOME, "auth.json")))
-        || process.env.SHARE_MASTER_QA === "1"
-      : Boolean(secrets[`builtin:${id}`]) || process.env.SHARE_MASTER_QA === "1")
+        || process.env.CHATSWITCH_QA === "1"
+      : Boolean(secrets[`builtin:${id}`]) || process.env.CHATSWITCH_QA === "1")
       || metadata.providerOrder.includes(id)
       || (id === "claude" && Boolean(metadata.providerSettings.claude));
     const builtins = Object.values(BASE_PROVIDERS)
@@ -754,9 +769,11 @@ class ProviderStore {
       // available in the dialog, while provider rows appear only after setup.
       .filter((item) => configuredBuiltin(item.id))
       .map((item) => {
-      if (item.id !== "claude") return item;
-      const provider = { ...item, ...(metadata.providerSettings.claude || {}) };
+      if (item.id !== "claude" && !["niubi", "hexuan"].includes(item.id)) return item;
+      const provider = { ...item, ...(metadata.providerSettings[item.id] || {}) };
+      if (item.id === "claude") {
       provider.vendorLabel ||= claudeVendorLabel(provider.baseUrl);
+      }
       return provider;
       });
     const providers = [
@@ -765,7 +782,7 @@ class ProviderStore {
         ...item,
         type: "relay",
         modelProvider: item.id,
-        envKey: "SHARE_MASTER_RELAY_API_KEY",
+        envKey: "CHATSWITCH_RELAY_API_KEY",
       })),
       ...metadata.accounts.map((item) => ({ ...item, type: "account", modelProvider: "openai" })),
     ];
@@ -794,6 +811,7 @@ class ProviderStore {
       deletable: ["relay", "account"].includes(provider.type),
       keyConfigurable: ["niubi", "hexuan", "claude"].includes(provider.id) || provider.type === "relay",
       modelConfigurable: provider.id === "claude",
+      authMode: provider.id === "claude" ? (provider.authMode || "token") : null,
       hasStoredKey: provider.type === "relay"
         ? Boolean(this.decryptRelayKey(provider.id))
         : Boolean(this.decryptStoredProviderKey(provider.id)),
@@ -860,6 +878,30 @@ class ProviderStore {
 
   threadAliases() {
     return { ...this.metadata().threadAliases };
+  }
+
+  threadDecorations() {
+    return structuredClone(this.metadata().threadDecorations);
+  }
+
+  setThreadDecoration(threadId, input = {}) {
+    const id = String(threadId || "").trim();
+    if (!id) throw new Error("无效的会话 ID。");
+    const metadata = this.metadata();
+    const previous = metadata.threadDecorations[id] || {};
+    const tags = Array.isArray(input.tags)
+      ? [...new Set(input.tags.map((tag) => String(tag || "").trim().slice(0, 40)).filter(Boolean))].slice(0, 20)
+      : previous.tags || [];
+    const next = {
+      pinned: input.pinned === undefined ? Boolean(previous.pinned) : Boolean(input.pinned),
+      favorite: input.favorite === undefined ? Boolean(previous.favorite) : Boolean(input.favorite),
+      tags,
+      updatedAt: Date.now(),
+    };
+    if (!next.pinned && !next.favorite && !next.tags.length) delete metadata.threadDecorations[id];
+    else metadata.threadDecorations[id] = next;
+    writeJson(METADATA_FILE, metadata);
+    return structuredClone(metadata.threadDecorations);
   }
 
   threadBranches() {
@@ -1241,7 +1283,7 @@ class ProviderStore {
       });
     }
     return {
-      schema: "share-master-config",
+      schema: CONFIG_SCHEMA,
       version: 1,
       exportedAt: new Date().toISOString(),
       containsCredentials: false,
@@ -1267,8 +1309,8 @@ class ProviderStore {
   }
 
   importConfiguration(bundle) {
-    if (!bundle || bundle.schema !== "share-master-config" || Number(bundle.version) !== 1) {
-      throw new Error("不是有效的 Synclattice 配置文件。");
+    if (!bundle || !LEGACY_CONFIG_SCHEMAS.has(bundle.schema) || Number(bundle.version) !== 1) {
+      throw new Error("不是有效的 ChatSwitch 配置文件。");
     }
     const metadata = this.metadata();
     let providersAdded = 0;
@@ -1320,6 +1362,7 @@ class ProviderStore {
         vendorLabel: String(claude.vendorLabel || "").trim() || undefined,
         baseUrl: String(claude.baseUrl || "").trim() || undefined,
         model: String(claude.model || "").trim() || undefined,
+        authMode: String(claude.authMode || "").trim() === "oauth" ? "oauth" : "token",
       };
     }
     for (const input of Array.isArray(bundle.projects) ? bundle.projects : []) {
@@ -1443,16 +1486,16 @@ class ProviderStore {
     const backupRoot = path.join(STORE_ROOT, "backups");
     fs.mkdirSync(backupRoot, { recursive: true });
     const existing = fs.readdirSync(backupRoot)
-      .filter((name) => /^share-master-backup-.*\.json$/i.test(name))
+      .filter((name) => /^(?:chatswitch|share-master)-backup-.*\.json$/i.test(name))
       .map((name) => ({ name, file: path.join(backupRoot, name), stat: fs.statSync(path.join(backupRoot, name)) }))
       .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs);
     if (existing[0] && Date.now() - existing[0].stat.mtimeMs < Math.max(0, minimumIntervalMs)) {
       return { created: false, name: existing[0].name, createdAt: existing[0].stat.mtimeMs };
     }
     const createdAt = Date.now();
-    const name = `share-master-backup-${new Date(createdAt).toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.json`;
+    const name = `chatswitch-backup-${new Date(createdAt).toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.json`;
     writeJson(path.join(backupRoot, name), {
-      schema: "share-master-backup",
+      schema: BACKUP_SCHEMA,
       version: 1,
       createdAt,
       machineBoundCredentials: true,
@@ -1471,7 +1514,7 @@ class ProviderStore {
     const backupRoot = path.join(STORE_ROOT, "backups");
     if (!fs.existsSync(backupRoot)) return [];
     return fs.readdirSync(backupRoot)
-      .filter((name) => /^share-master-backup-.*\.json$/i.test(name))
+      .filter((name) => /^(?:chatswitch|share-master)-backup-.*\.json$/i.test(name))
       .map((name) => {
         const stat = fs.statSync(path.join(backupRoot, name));
         return { name, createdAt: stat.mtimeMs, size: stat.size };
@@ -1484,7 +1527,7 @@ class ProviderStore {
     const file = path.resolve(backupRoot, path.basename(String(name || "")));
     if (path.dirname(file) !== backupRoot || !fs.existsSync(file)) throw new Error("备份不存在。");
     const backup = readJson(file, null);
-    if (!backup || backup.schema !== "share-master-backup" || Number(backup.version) !== 1
+    if (!backup || !LEGACY_BACKUP_SCHEMAS.has(backup.schema) || Number(backup.version) !== 1
       || !backup.metadata || typeof backup.encryptedCredentials !== "object") {
       throw new Error("备份文件无效或已损坏。");
     }
@@ -1499,7 +1542,9 @@ class ProviderStore {
     const settings = metadata.syncSettings || {};
     const backend = settings.backend === "webdav" ? "webdav" : "directory";
     const directory = typeof settings.directory === "string" ? settings.directory : null;
-    const file = directory ? path.join(directory, "share-master-sync.json") : null;
+    const syncFiles = directory
+      ? [SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME].map((name) => path.join(directory, name))
+      : [];
     const secrets = readJson(SECRETS_FILE, {});
     return {
       backend,
@@ -1509,7 +1554,7 @@ class ProviderStore {
       autoSync: Boolean(settings.autoSync),
       lastSyncedAt: Number(settings.lastSyncedAt) || null,
       remoteExists: backend === "directory"
-        ? Boolean(file && fs.existsSync(file))
+        ? syncFiles.some((file) => fs.existsSync(file))
         : Boolean(settings.lastRemoteExists),
       history: metadata.syncHistory.slice(0, 20).map((entry) => ({ ...entry })),
     };
@@ -1536,7 +1581,7 @@ class ProviderStore {
       const storeRoot = path.resolve(STORE_ROOT);
       const relative = path.relative(storeRoot, directory);
       if (!relative || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-        throw new Error("同步目录不能位于 Synclattice 私有数据目录内。");
+        throw new Error("同步目录不能位于 ChatSwitch 私有数据目录内。");
       }
       fs.mkdirSync(directory, { recursive: true });
       if (!fs.statSync(directory).isDirectory()) throw new Error("同步位置不是目录。");
@@ -1623,10 +1668,11 @@ class ProviderStore {
     if (settings.backend !== "webdav" || !settings.webdavUrl) throw new Error("请先配置 WebDAV 同步。");
     const credentials = this.webdavCredentials();
     if (!credentials) throw new Error("WebDAV 凭据不可用，请重新输入。");
-    const target = new URL("share-master-sync.json", settings.webdavUrl).toString();
+    const target = new URL(SYNC_FILE_NAME, settings.webdavUrl).toString();
+    const legacyTarget = new URL(LEGACY_SYNC_FILE_NAME, settings.webdavUrl).toString();
     const authorization = `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`, "utf8").toString("base64")}`;
-    const request = async (method, body = undefined) => {
-      const response = await fetchImpl(target, {
+    const request = async (requestTarget, method, body = undefined) => {
+      const response = await fetchImpl(requestTarget, {
         method,
         headers: { Authorization: authorization, ...(body ? { "Content-Type": "application/json; charset=utf-8" } : {}) },
         body,
@@ -1641,7 +1687,8 @@ class ProviderStore {
 
     const localBundle = this.exportConfiguration();
     const localHash = configurationHash(localBundle);
-    const response = await request("GET");
+    let response = await request(target, "GET");
+    if (response.status === 404) response = await request(legacyTarget, "GET");
     let remoteBundle = null;
     let remoteHash = null;
     if (response.status !== 404) {
@@ -1650,7 +1697,7 @@ class ProviderStore {
       } catch {
         throw new Error("WebDAV 中的同步文件不是有效 JSON。");
       }
-      if (remoteBundle?.schema !== "share-master-config" || Number(remoteBundle.version) !== 1) {
+      if (!LEGACY_CONFIG_SCHEMAS.has(remoteBundle?.schema) || Number(remoteBundle.version) !== 1) {
         throw new Error("WebDAV 中的同步文件无效或已损坏。");
       }
       remoteHash = configurationHash(remoteBundle);
@@ -1676,12 +1723,12 @@ class ProviderStore {
       this.createRotatingBackup(10, 0);
       imported = this.importConfiguration(remoteBundle);
       const merged = { ...this.exportConfiguration(), exportedAt: new Date().toISOString() };
-      await request("PUT", `${JSON.stringify(merged, null, 2)}\n`);
+      await request(target, "PUT", `${JSON.stringify(merged, null, 2)}\n`);
       syncedHash = configurationHash(merged);
       direction = "pull";
     } else if (mode === "push") {
       const payload = { ...localBundle, exportedAt: new Date().toISOString() };
-      await request("PUT", `${JSON.stringify(payload, null, 2)}\n`);
+      await request(target, "PUT", `${JSON.stringify(payload, null, 2)}\n`);
       syncedHash = configurationHash(payload);
       direction = "push";
     }
@@ -1698,7 +1745,9 @@ class ProviderStore {
     const settings = metadata.syncSettings || {};
     if (!settings.directory) throw new Error("请先选择同步目录。");
     const directory = path.resolve(settings.directory);
-    const file = path.join(directory, "share-master-sync.json");
+    const currentFile = path.join(directory, SYNC_FILE_NAME);
+    const legacyFile = path.join(directory, LEGACY_SYNC_FILE_NAME);
+    const file = fs.existsSync(currentFile) || !fs.existsSync(legacyFile) ? currentFile : legacyFile;
     fs.mkdirSync(directory, { recursive: true });
 
     const localBundle = this.exportConfiguration();
@@ -1707,7 +1756,7 @@ class ProviderStore {
     let remoteHash = null;
     if (fs.existsSync(file)) {
       remoteBundle = readJson(file, null);
-      if (!remoteBundle || remoteBundle.schema !== "share-master-config" || Number(remoteBundle.version) !== 1) {
+      if (!remoteBundle || !LEGACY_CONFIG_SCHEMAS.has(remoteBundle.schema) || Number(remoteBundle.version) !== 1) {
         throw new Error("同步目录中的配置文件无效或已损坏。");
       }
       remoteHash = configurationHash(remoteBundle);
@@ -1735,12 +1784,12 @@ class ProviderStore {
       this.createRotatingBackup(10, 0);
       imported = this.importConfiguration(remoteBundle);
       const mergedBundle = { ...this.exportConfiguration(), exportedAt: new Date().toISOString() };
-      writeJson(file, mergedBundle);
+      writeJson(currentFile, mergedBundle);
       syncedHash = configurationHash(mergedBundle);
       direction = "pull";
     } else if (mode === "push") {
       const payload = { ...localBundle, exportedAt: new Date().toISOString() };
-      writeJson(file, payload);
+      writeJson(currentFile, payload);
       syncedHash = configurationHash(payload);
       direction = "push";
     }
@@ -1976,6 +2025,37 @@ class ProviderStore {
     return this.metadata().conversationMirrorSource;
   }
 
+  conversationMirrorSettings() {
+    const metadata = this.metadata();
+    const intervalMs = Number(metadata.conversationMirrorIntervalMs);
+    return {
+      source: metadata.conversationMirrorSource || null,
+      intervalMs: Number.isFinite(intervalMs) ? Math.max(15000, Math.min(300000, intervalMs)) : 60000,
+      enabled: Boolean(metadata.conversationMirrorSource) && metadata.conversationMirrorEnabled !== false,
+      target: this.conversationHome(),
+    };
+  }
+
+  setConversationMirrorSettings(input = {}) {
+    const sourceValue = String(input.source || "").trim();
+    const enabled = Boolean(input.enabled) && Boolean(sourceValue);
+    const intervalSeconds = Number(input.intervalSeconds);
+    const intervalMs = Number.isFinite(intervalSeconds)
+      ? Math.max(15, Math.min(300, intervalSeconds)) * 1000
+      : 60000;
+    const metadata = this.metadata();
+    if (sourceValue) {
+      this.setConversationMirrorSource(sourceValue);
+    } else {
+      metadata.conversationMirrorSource = null;
+    }
+    const next = this.metadata();
+    next.conversationMirrorIntervalMs = intervalMs;
+    next.conversationMirrorEnabled = enabled;
+    writeJson(METADATA_FILE, next);
+    return this.conversationMirrorSettings();
+  }
+
   setConversationMirrorSource(directory) {
     const source = path.resolve(String(directory || "").trim());
     if (!directory || !fs.existsSync(source) || !fs.statSync(source).isDirectory()) {
@@ -1990,7 +2070,7 @@ class ProviderStore {
     if (source === target
       || (relativeTarget && !relativeTarget.startsWith("..") && !path.isAbsolute(relativeTarget))
       || (relativeSource && !relativeSource.startsWith("..") && !path.isAbsolute(relativeSource))) {
-      throw new Error("聊天记录源目录和 Synclattice 副本目录必须彼此独立。");
+      throw new Error("聊天记录源目录和 ChatSwitch 副本目录必须彼此独立。");
     }
     const metadata = this.metadata();
     metadata.conversationMirrorSource = source;
@@ -2146,7 +2226,7 @@ class ProviderStore {
     const id = String(threadId || "").trim();
     if (!id) throw new Error("无效的会话 ID。");
     const metadata = this.metadata();
-    if (metadata.deletedThreads.includes(id)) throw new Error("会话已被永久移出 Synclattice。");
+    if (metadata.deletedThreads.includes(id)) throw new Error("会话已被永久移出 ChatSwitch。");
     if (!metadata.localArchivedThreads.includes(id)) metadata.localArchivedThreads.push(id);
     metadata.hiddenThreads = metadata.hiddenThreads.filter((item) => item !== id);
     metadata.pendingDeletions = metadata.pendingDeletions.filter((item) => item.threadId !== id);
@@ -2167,7 +2247,7 @@ class ProviderStore {
     const id = String(threadId || "").trim();
     if (!id) throw new Error("无效的会话 ID。");
     const metadata = this.metadata();
-    if (metadata.deletedThreads.includes(id)) throw new Error("会话已被永久移出 Synclattice。");
+    if (metadata.deletedThreads.includes(id)) throw new Error("会话已被永久移出 ChatSwitch。");
     if (!metadata.hiddenThreads.includes(id)) metadata.hiddenThreads.push(id);
     metadata.localArchivedThreads = metadata.localArchivedThreads.filter((item) => item !== id);
     writeJson(METADATA_FILE, metadata);
@@ -2217,6 +2297,7 @@ class ProviderStore {
     if (!metadata.deletedThreads.includes(id)) metadata.deletedThreads.push(id);
     delete metadata.projectThreads[id];
     delete metadata.threadAliases[id];
+    delete metadata.threadDecorations[id];
     delete metadata.threadBranches[id];
     delete metadata.threadTimeline[id];
     delete metadata.messageQueues[id];
@@ -2486,6 +2567,37 @@ class ProviderStore {
     return this.publicProvider(id);
   }
 
+  updateBuiltinApi(input) {
+    const request = input && typeof input === "object" ? input : {};
+    const id = String(request.id || "").trim();
+    if (!["niubi", "hexuan"].includes(id)) throw new Error("该连接不是可编辑的内置 API。");
+    const label = String(request.label || "").trim();
+    const rawBaseUrl = String(request.baseUrl || "").trim();
+    const model = String(request.model || "").trim();
+    let parsedBaseUrl;
+    try { parsedBaseUrl = new URL(rawBaseUrl); } catch { parsedBaseUrl = null; }
+    if (!label || !parsedBaseUrl || !["http:", "https:"].includes(parsedBaseUrl.protocol) || !model) {
+      throw new Error("供应商名称、有效 Base URL 和默认模型均为必填项。");
+    }
+    if (parsedBaseUrl.username || parsedBaseUrl.password || parsedBaseUrl.search || parsedBaseUrl.hash) {
+      throw new Error("Base URL 不能包含凭据、query 参数或 hash。");
+    }
+    const discoveredModels = [...new Set((Array.isArray(request.discoveredModels) ? request.discoveredModels : [])
+      .map((item) => String(item || "").trim()).filter(Boolean))];
+    const metadata = this.metadata();
+    metadata.providerSettings[id] = {
+      ...(metadata.providerSettings[id] || {}),
+      baseUrl: parsedBaseUrl.toString().replace(/\/+$/, ""),
+      model,
+      discoveredModels,
+      updatedAt: Date.now(),
+    };
+    writeJson(METADATA_FILE, metadata);
+    const apiKey = String(request.apiKey || "").trim();
+    if (apiKey) this.saveProviderKey(id, apiKey);
+    return this.publicProvider(id);
+  }
+
   saveProviderKey(id, apiKey) {
     const providerId = String(id || "").trim();
     const value = String(apiKey || "").trim();
@@ -2584,7 +2696,19 @@ class ProviderStore {
       return provider;
     }
     if (BASE_PROVIDERS[id]) {
-      const provider = { ...BASE_PROVIDERS[id], codexHome: conversationHome };
+      const settings = ["niubi", "hexuan"].includes(id)
+        ? (this.metadata().providerSettings[id] || {})
+        : {};
+      const provider = { ...BASE_PROVIDERS[id], ...settings, codexHome: conversationHome };
+      if (["niubi", "hexuan"].includes(id) && Array.isArray(provider.args)) {
+        provider.args = provider.args.map((value, index, args) => {
+          if (value.startsWith("model=") && args[index - 1] === "-c") return `model=${JSON.stringify(provider.model)}`;
+          if (value.startsWith(`model_providers.${id}.base_url=`) && args[index - 1] === "-c") {
+            return `model_providers.${id}.base_url=${JSON.stringify(provider.baseUrl)}`;
+          }
+          return value;
+        });
+      }
       const storedKey = this.decryptStoredProviderKey(id);
       if (storedKey && provider.envKey) provider.env = { [provider.envKey]: storedKey };
       return this.withMcpConfiguration(provider);
@@ -2599,9 +2723,9 @@ class ProviderStore {
           type: "relay",
           engine: "openai-compatible",
           modelProvider: relay.id,
-          envKey: "SHARE_MASTER_RELAY_API_KEY",
+          envKey: "CHATSWITCH_RELAY_API_KEY",
           apiKey,
-          env: apiKey ? { SHARE_MASTER_RELAY_API_KEY: apiKey } : {},
+          env: apiKey ? { CHATSWITCH_RELAY_API_KEY: apiKey } : {},
           codexHome: conversationHome,
         };
       }
@@ -2610,7 +2734,7 @@ class ProviderStore {
         ...relay,
         type: "relay",
         modelProvider: relay.id,
-        envKey: "SHARE_MASTER_RELAY_API_KEY",
+        envKey: "CHATSWITCH_RELAY_API_KEY",
         balanceType: "auto",
         args: [
           "-c", `model_provider=${JSON.stringify(relay.id)}`,
@@ -2620,11 +2744,11 @@ class ProviderStore {
           "-c", "features.remote_plugin=false",
           "-c", `model_providers.${relay.id}.name=${JSON.stringify(relay.label)}`,
           "-c", `model_providers.${relay.id}.base_url=${JSON.stringify(relay.baseUrl)}`,
-          "-c", `model_providers.${relay.id}.env_key=${JSON.stringify("SHARE_MASTER_RELAY_API_KEY")}`,
+          "-c", `model_providers.${relay.id}.env_key=${JSON.stringify("CHATSWITCH_RELAY_API_KEY")}`,
           "-c", `model_providers.${relay.id}.wire_api=${JSON.stringify("responses")}`,
           "app-server",
         ],
-        env: apiKey ? { SHARE_MASTER_RELAY_API_KEY: apiKey } : {},
+        env: apiKey ? { CHATSWITCH_RELAY_API_KEY: apiKey } : {},
         codexHome: conversationHome,
       });
     }
@@ -2727,10 +2851,15 @@ class ProviderStore {
     }
     if (!model) throw new Error("请选择 Claude 模型。");
     const metadata = this.metadata();
+    const existing = metadata.providerSettings.claude || {};
+    const officialHost = new URL(baseUrl).hostname.toLowerCase() === "api.anthropic.com";
+    const requestedAuthMode = String(input?.authMode || existing.authMode || "token").trim();
+    const authMode = requestedAuthMode === "oauth" && officialHost ? "oauth" : "token";
     metadata.providerSettings.claude = {
       baseUrl,
       model,
       vendorLabel: requestedVendorLabel || claudeVendorLabel(baseUrl),
+      authMode,
       updatedAt: Date.now(),
     };
     writeJson(METADATA_FILE, metadata);
@@ -2777,4 +2906,5 @@ module.exports = {
   PROVIDER_PRESETS,
   providerPresetCatalog,
   nextScheduledAt,
+  providerApiKey,
 };

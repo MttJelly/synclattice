@@ -1,8 +1,8 @@
 const { version } = require("../package.json");
 
 const APP_VERSION = String(version || "0.0.0");
-const USER_AGENT = `Synclattice/${APP_VERSION}`;
-const RELEASE_REPOSITORY = "MttJelly/synclattice";
+const USER_AGENT = `ChatSwitch/${APP_VERSION}`;
+const RELEASE_REPOSITORY = "MttJelly/chatswitch";
 const LATEST_RELEASE_API = `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases/latest`;
 
 function normalizeVersion(value) {

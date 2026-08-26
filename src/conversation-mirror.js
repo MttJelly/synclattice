@@ -3,8 +3,8 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 
 const CHAT_AREAS = ["sessions", "archived_sessions"];
-const MANIFEST_NAME = ".share-master-mirror.json";
-const BACKUP_DIRECTORY = ".share-master-sync-backups";
+const MANIFEST_NAME = ".chatswitch-mirror.json";
+const BACKUP_DIRECTORY = ".chatswitch-sync-backups";
 
 function isInside(parent, child) {
   const relative = path.relative(parent, child);
@@ -50,7 +50,7 @@ function normalizedSources(sourceDirectories, targetHome) {
     const sourceHome = path.resolve(String(value || "").trim());
     if (!value || unique.some((item) => item.toLocaleLowerCase() === sourceHome.toLocaleLowerCase())) continue;
     if (sourceHome === targetHome || isInside(sourceHome, targetHome) || isInside(targetHome, sourceHome)) {
-      throw new Error("聊天记录源目录和 Synclattice 副本目录必须彼此独立。");
+      throw new Error("聊天记录源目录和 ChatSwitch 副本目录必须彼此独立。");
     }
     if (!fs.existsSync(sourceHome) || !fs.statSync(sourceHome).isDirectory()) continue;
     if (!CHAT_AREAS.some((area) => fs.existsSync(path.join(sourceHome, area)))) continue;
@@ -68,7 +68,7 @@ function changedSince(entry, stats, prefix) {
 
 async function copyRecord(source, target, sourceStats) {
   await fsp.mkdir(path.dirname(target), { recursive: true });
-  const temporary = `${target}.share-master-sync.tmp`;
+  const temporary = `${target}.chatswitch-sync.tmp`;
   await fsp.copyFile(source, temporary);
   await fsp.rename(temporary, target);
   await fsp.utimes(target, sourceStats.atime, sourceStats.mtime);
@@ -83,7 +83,7 @@ async function syncConversationMirrors(sourceDirectories, targetDirectory) {
   const previous = await readManifest(targetHome);
   const manifest = {
     version: 2,
-    direction: "source-to-share-master",
+    direction: "source-to-chatswitch",
     sourceHome: sourceHomes[0],
     sourceHomes,
     targetHome,

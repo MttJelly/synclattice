@@ -17,12 +17,13 @@ const {
   interruptedToolCalls,
   repairInterruptedToolCallsForThread,
 } = require("../src/conversation-integrity");
-const providerStoreTestRoot = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-store-unit-"));
-process.env.SHARE_MASTER_STORE_ROOT = providerStoreTestRoot;
+const providerStoreTestRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-store-unit-"));
+process.env.CHATSWITCH_STORE_ROOT = providerStoreTestRoot;
 const {
   ProviderStore,
   DEFAULT_CONVERSATION_HOME,
   nextScheduledAt,
+  providerApiKey,
   providerPresetCatalog,
   reasoningProfile,
   seedOfficialCredentials,
@@ -41,7 +42,7 @@ const { fetchOpenAIModels, modelsEndpoint, modelsEndpointCandidates } = require(
 const { executeScheduledTask, finalizeScheduledTask } = require("../src/scheduled-task-runner");
 const { syncConversationMirror, syncConversationMirrors } = require("../src/conversation-mirror");
 const { installSkillSource, listManagedSkills, syncManagedSkills, syncSkillRoots } = require("../src/skill-mirror");
-const { parseSynclatticeLink, synclatticeLinkFromArgs } = require("../src/deep-link");
+const { parseChatSwitchLink, chatSwitchLinkFromArgs } = require("../src/deep-link");
 const { createLocalHistoryReader } = require("../src/local-conversation-history");
 const { createLocalProviderDiscovery, parseCodexConfig } = require("../src/local-provider-discovery");
 const { APP_VERSION, USER_AGENT, compareVersions, updateFromRelease } = require("../src/app-version");
@@ -86,7 +87,7 @@ function testApprovalNotifications() {
     params: { command: "tool.exe --api-key must-not-appear" },
   };
   const commandSpec = approvalNotificationSpec(command);
-  assert.equal(commandSpec.title, "Synclattice 请求授权");
+  assert.equal(commandSpec.title, "ChatSwitch 请求授权");
   assert.equal(commandSpec.actions.length, 3);
   assert.equal(commandSpec.body.includes("must-not-appear"), false);
   assert.deepEqual(commandSpec.actions.map((action) => action.text), ["拒绝", "允许一次", "本会话允许"]);
@@ -182,7 +183,7 @@ function testOfficialAccountUsageNormalization() {
 }
 
 function testWindowsNotificationIdentity() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-notification-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-notification-"));
   const programs = path.join(root, "Microsoft", "Windows", "Start Menu", "Programs");
   const legacyPath = path.join(programs, "Electron.lnk");
   const target = path.join(root, "electron.exe");
@@ -193,17 +194,17 @@ function testWindowsNotificationIdentity() {
     const shellApi = {
       writeShortcutLink(shortcutPath, operation, details) {
         writes.push({ shortcutPath, operation, details });
-        fs.writeFileSync(shortcutPath, "share-master", "utf8");
+        fs.writeFileSync(shortcutPath, "chatswitch", "utf8");
         return true;
       },
       readShortcutLink() {
-        return { target, appUserModelId: "com.synclattice.desktop" };
+        return { target, appUserModelId: "com.chatswitch.desktop" };
       },
     };
     const result = ensureWindowsNotificationIdentity({
       platform: "win32",
       appData: root,
-      appUserModelId: "com.synclattice.desktop",
+      appUserModelId: "com.chatswitch.desktop",
       toastActivatorClsid: "{E6B8F4D5-4A0D-4B9F-8E3B-3C0F5C3E6D21}",
       target,
       args: "--test",
@@ -215,20 +216,20 @@ function testWindowsNotificationIdentity() {
     assert.equal(result.removedLegacy, true);
     assert.equal(fs.existsSync(legacyPath), false);
     assert.equal(writes.length, 1);
-    assert.equal(path.basename(writes[0].shortcutPath), "Synclattice.lnk");
+    assert.equal(path.basename(writes[0].shortcutPath), "ChatSwitch.lnk");
     assert.equal(writes[0].operation, "create");
-    assert.equal(writes[0].details.description, "Synclattice");
-    assert.equal(writes[0].details.appUserModelId, "com.synclattice.desktop");
+    assert.equal(writes[0].details.description, "ChatSwitch");
+    assert.equal(writes[0].details.appUserModelId, "com.chatswitch.desktop");
     assert.equal(writes[0].details.toastActivatorClsid, "{E6B8F4D5-4A0D-4B9F-8E3B-3C0F5C3E6D21}");
     fs.writeFileSync(legacyPath, "unrelated", "utf8");
     shellApi.readShortcutLink = () => ({
       target: path.join(root, "another-electron-app.exe"),
-      appUserModelId: "com.synclattice.desktop",
+      appUserModelId: "com.chatswitch.desktop",
     });
     const preserved = ensureWindowsNotificationIdentity({
       platform: "win32",
       appData: root,
-      appUserModelId: "com.synclattice.desktop",
+      appUserModelId: "com.chatswitch.desktop",
       toastActivatorClsid: "{E6B8F4D5-4A0D-4B9F-8E3B-3C0F5C3E6D21}",
       target,
       shellApi,
@@ -238,23 +239,23 @@ function testWindowsNotificationIdentity() {
     assert.equal(fs.existsSync(legacyPath), true);
     assert.equal(notificationShortcutArguments({
       isPackaged: false,
-      userData: "C:\\Synclattice Data",
+      userData: "C:\\ChatSwitch Data",
       applicationRoot: "F:\\codepro",
-    }), '--user-data-dir="C:\\Synclattice Data" "F:\\codepro"');
+    }), '--user-data-dir="C:\\ChatSwitch Data" "F:\\codepro"');
     assert.equal(notificationShortcutArguments({ isPackaged: true }), "");
     assert.deepEqual(windowsTaskbarDetails({
       isPackaged: false,
-      userData: "C:\\Synclattice Data",
+      userData: "C:\\ChatSwitch Data",
       applicationRoot: "F:\\codepro",
-      appUserModelId: "com.synclattice.desktop",
+      appUserModelId: "com.chatswitch.desktop",
       target: "F:\\codepro\\electron.exe",
       icon: "F:\\codepro\\build\\icon.ico",
     }), {
-      appId: "com.synclattice.desktop",
+      appId: "com.chatswitch.desktop",
       appIconPath: "F:\\codepro\\build\\icon.ico",
       appIconIndex: 0,
-      relaunchCommand: '"F:\\codepro\\electron.exe" --user-data-dir="C:\\Synclattice Data" "F:\\codepro"',
-      relaunchDisplayName: "Synclattice",
+      relaunchCommand: '"F:\\codepro\\electron.exe" --user-data-dir="C:\\ChatSwitch Data" "F:\\codepro"',
+      relaunchDisplayName: "ChatSwitch",
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -299,11 +300,11 @@ function testRawCodexDiagnosticsStayInternal() {
 
 function testApplicationVersioning() {
   assert.equal(APP_VERSION, require("../package.json").version);
-  assert.equal(USER_AGENT, `Synclattice/${APP_VERSION}`);
+  assert.equal(USER_AGENT, `ChatSwitch/${APP_VERSION}`);
   assert.equal(compareVersions("0.1.2", "0.1.1"), 1);
   assert.equal(compareVersions("v0.1.2", "0.1.2"), 0);
   assert.equal(compareVersions("0.1.1", "0.1.2"), -1);
-  const release = { tag_name: "v0.2.0", html_url: "https://github.com/MttJelly/synclattice/releases/tag/v0.2.0" };
+  const release = { tag_name: "v0.2.0", html_url: "https://github.com/MttJelly/chatswitch/releases/tag/v0.2.0" };
   assert.deepEqual(updateFromRelease("0.1.2", release), {
     status: "available",
     currentVersion: "0.1.2",
@@ -315,7 +316,7 @@ function testApplicationVersioning() {
 }
 
 function testOfficialCredentialSeeding() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-deck-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-unit-"));
   const source = path.join(root, "source");
   const target = path.join(root, "target");
   try {
@@ -342,7 +343,7 @@ function testIsolatedStoreDefaults() {
     model: "fable",
   });
   assert.equal(claude.globalProjectsRoot, null);
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-outside-store-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-outside-store-"));
   try {
     assert.throws(() => store.setConversationHome(outside), /隔离模式/);
   } finally {
@@ -350,10 +351,23 @@ function testIsolatedStoreDefaults() {
   }
 }
 
+function testClaudeOfficialAuthSettings() {
+  const store = new ProviderStore();
+  const provider = store.saveClaudeSettings({
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-sonnet",
+    vendorLabel: "Anthropic 官方",
+    authMode: "oauth",
+  });
+  assert.equal(provider.id, "claude");
+  assert.equal(provider.authMode, "oauth");
+  assert.equal(store.resolve("claude").authMode, "oauth");
+}
+
 
 
 async function testConversationMirror() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-mirror-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-mirror-unit-"));
   const source = path.join(root, "source");
   const target = path.join(root, "target");
   const activeSource = path.join(source, "sessions", "2026", "07", "thread-a.jsonl");
@@ -380,7 +394,7 @@ async function testConversationMirror() {
     assert.equal(updated.updated, 1);
     assert.equal(updated.backedUp, 1);
     assert.equal(fs.readFileSync(activeTarget, "utf8"), '{"id":"a","value":2}\n');
-    assert.equal(fs.existsSync(path.join(target, ".share-master-sync-backups")), true);
+    assert.equal(fs.existsSync(path.join(target, ".chatswitch-sync-backups")), true);
 
     fs.unlinkSync(archivedSource);
     await syncConversationMirror(source, target);
@@ -391,7 +405,7 @@ async function testConversationMirror() {
 }
 
 async function testConversationMirrorMultipleSources() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-mirror-multi-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-mirror-multi-unit-"));
   const primary = path.join(root, "primary");
   const original = path.join(root, "original");
   const target = path.join(root, "target");
@@ -422,7 +436,7 @@ async function testConversationMirrorMultipleSources() {
 
 function testPrivateConfigurationSync() {
   const store = new ProviderStore();
-  const syncRoot = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-sync-unit-"));
+  const syncRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-sync-unit-"));
   try {
     assert.throws(() => store.configureSync({ directory: path.join(providerStoreTestRoot, "sync") }), /不能位于/);
     const configured = store.configureSync({ directory: syncRoot, autoSync: true });
@@ -432,7 +446,7 @@ function testPrivateConfigurationSync() {
     const pushed = store.syncConfiguration("auto");
     assert.equal(pushed.conflict, false);
     assert.equal(pushed.result.direction, "push");
-    const syncFile = path.join(syncRoot, "share-master-sync.json");
+    const syncFile = path.join(syncRoot, "chatswitch-sync.json");
     const remote = JSON.parse(fs.readFileSync(syncFile, "utf8"));
     assert.equal(remote.containsCredentials, false);
     assert.equal(JSON.stringify(remote).includes("encryptedCredentials"), false);
@@ -463,7 +477,7 @@ async function testWebdavConfigurationSync() {
   const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
   metadata.syncSettings = {
     backend: "webdav",
-    webdavUrl: "https://dav.example.test/share-master/",
+    webdavUrl: "https://dav.example.test/chatswitch/",
     autoSync: false,
     lastSyncedHash: null,
     lastSyncedAt: null,
@@ -485,7 +499,7 @@ async function testWebdavConfigurationSync() {
   };
   const pushed = await store.syncConfigured("auto", fakeFetch);
   assert.equal(pushed.result.direction, "push");
-  assert.equal(requests[0].url, "https://dav.example.test/share-master/share-master-sync.json");
+  assert.equal(requests[0].url, "https://dav.example.test/chatswitch/chatswitch-sync.json");
   assert.match(requests[0].authorization, /^Basic /);
   assert.equal(requests.some((entry) => entry.authorization.includes("qa-pass")), false);
 
@@ -506,7 +520,7 @@ async function testWebdavConfigurationSync() {
 }
 
 async function testSkillMirror() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-skill-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-skill-unit-"));
   const firstSource = path.join(root, "first");
   const secondSource = path.join(root, "second");
   const target = path.join(root, "private", "skills");
@@ -555,7 +569,7 @@ async function testSkillMirror() {
 }
 
 async function testManagedSkillActivation() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-managed-skill-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-managed-skill-unit-"));
   const source = path.join(root, "source");
   const library = path.join(root, "private-library");
   const active = path.join(root, "active");
@@ -585,6 +599,11 @@ async function testManagedSkillActivation() {
 
 function testPrivateExtensionsStore() {
   const store = new ProviderStore();
+  const decorated = store.setThreadDecoration("thread-fixture", { pinned: true, favorite: true, tags: ["论文", "重要"] });
+  assert.equal(decorated["thread-fixture"].pinned, true);
+  assert.deepEqual(decorated["thread-fixture"].tags, ["论文", "重要"]);
+  const cleared = store.setThreadDecoration("thread-fixture", { pinned: false, favorite: false, tags: [] });
+  assert.equal(cleared["thread-fixture"], undefined);
   const skill = store.setSkillEnabled("nature-writing", false);
   assert.deepEqual(skill, { name: "nature-writing", enabled: false });
   assert.deepEqual(store.disabledSkills(), ["nature-writing"]);
@@ -611,20 +630,50 @@ function testPrivateExtensionsStore() {
   assert.equal(store.mcpServers().length, 0);
 }
 
+function testBuiltinApiEditing() {
+  const store = new ProviderStore();
+  store.reorderProviders(["hexuan"]);
+  const updated = store.updateBuiltinApi({
+    id: "hexuan",
+    label: "Hexuan API",
+    baseUrl: "https://relay.example.test/v1",
+    model: "fixture-model",
+    discoveredModels: ["fixture-model", "fixture-reasoning"],
+  });
+  assert.equal(updated.id, "hexuan");
+  assert.equal(updated.baseUrl, "https://relay.example.test/v1");
+  assert.deepEqual(updated.discoveredModels, ["fixture-model", "fixture-reasoning"]);
+  const resolved = store.resolve("hexuan");
+  assert.equal(resolved.baseUrl, "https://relay.example.test/v1");
+  assert.equal(resolved.model, "fixture-model");
+  assert.ok(resolved.args.includes('model="fixture-model"'));
+  assert.ok(resolved.args.includes('model_providers.hexuan.base_url="https://relay.example.test/v1"'));
+}
+
+function testProviderApiKeyFallback() {
+  const provider = {
+    envKey: "HEXUAN_API_KEY",
+    env: { HEXUAN_API_KEY: "encrypted-saved-key" },
+  };
+  assert.equal(providerApiKey(provider, {}), "encrypted-saved-key");
+  assert.equal(providerApiKey({ envKey: "HEXUAN_API_KEY" }, { HEXUAN_API_KEY: "environment-key" }), "environment-key");
+  assert.equal(providerApiKey({ apiKey: "relay-key" }, {}), "relay-key");
+}
+
 function testDeepLinks() {
-  assert.deepEqual(parseSynclatticeLink("synclattice://extensions?tab=mcp"), { action: "extensions", tab: "mcp" });
-  assert.deepEqual(parseSynclatticeLink("synclattice://scheduled"), { action: "scheduled" });
-  assert.deepEqual(parseSynclatticeLink("synclattice://new?provider=relay_123&projectId=project_456"), {
+  assert.deepEqual(parseChatSwitchLink("chatswitch://extensions?tab=mcp"), { action: "extensions", tab: "mcp" });
+  assert.deepEqual(parseChatSwitchLink("chatswitch://scheduled"), { action: "scheduled" });
+  assert.deepEqual(parseChatSwitchLink("chatswitch://new?provider=relay_123&projectId=project_456"), {
     action: "new", provider: "relay_123", thread: null, projectId: "project_456", workspace: null,
   });
-  assert.deepEqual(parseSynclatticeLink("synclattice://open?thread=thread_123&workspace=F%3A%5Ccodepro"), {
+  assert.deepEqual(parseChatSwitchLink("chatswitch://open?thread=thread_123&workspace=F%3A%5Ccodepro"), {
     action: "open", provider: null, thread: "thread_123", projectId: null, workspace: "F:\\codepro",
   });
-  assert.equal(parseSynclatticeLink("https://example.com/open"), null);
-  assert.equal(parseSynclatticeLink("synclattice://unknown"), null);
-  assert.equal(parseSynclatticeLink(`synclattice://open?thread=${"x".repeat(300)}`)?.thread, null);
-  assert.equal(synclatticeLinkFromArgs(["electron.exe", ".", "synclattice://scheduled"]), "synclattice://scheduled");
-  assert.deepEqual(parseSynclatticeLink("synclattice://import?type=provider&label=Lab%20API&baseUrl=https%3A%2F%2Fapi.example.test%2Fv1&model=lab-model&preset=custom"), {
+  assert.equal(parseChatSwitchLink("https://example.com/open"), null);
+  assert.equal(parseChatSwitchLink("chatswitch://unknown"), null);
+  assert.equal(parseChatSwitchLink(`chatswitch://open?thread=${"x".repeat(300)}`)?.thread, null);
+  assert.equal(chatSwitchLinkFromArgs(["electron.exe", ".", "chatswitch://scheduled"]), "chatswitch://scheduled");
+  assert.deepEqual(parseChatSwitchLink("chatswitch://import?type=provider&label=Lab%20API&baseUrl=https%3A%2F%2Fapi.example.test%2Fv1&model=lab-model&preset=custom"), {
     action: "import",
     importType: "provider",
     config: {
@@ -635,14 +684,14 @@ function testDeepLinks() {
   const promptData = Buffer.from(JSON.stringify({
     type: "prompt", name: "review", description: "Review changes", content: "Review this:\n{{content}}",
   })).toString("base64url");
-  assert.equal(parseSynclatticeLink(`synclattice://import?data=${promptData}`).config.content.includes("\n"), true);
+  assert.equal(parseChatSwitchLink(`chatswitch://import?data=${promptData}`).config.content.includes("\n"), true);
   const mcpData = Buffer.from(JSON.stringify({
     type: "mcp", name: "Local MCP", transport: "stdio", command: "node", args: ["server.js"], envKeys: ["ACCESS_TOKEN"],
   })).toString("base64url");
-  assert.deepEqual(parseSynclatticeLink(`synclattice://import?data=${mcpData}`).config.envKeys, ["ACCESS_TOKEN"]);
-  assert.equal(parseSynclatticeLink("synclattice://import?type=skill&source=https%3A%2F%2Fgithub.com%2Fexample%2Fskills").config.source, "https://github.com/example/skills");
-  assert.equal(parseSynclatticeLink("synclattice://import?type=provider&label=Unsafe&baseUrl=https%3A%2F%2Fexample.test%2Fv1&model=x&apiKey=secret"), null);
-  assert.equal(parseSynclatticeLink("synclattice://import?type=skill&source=https%3A%2F%2Fexample.com%2Fskills"), null);
+  assert.deepEqual(parseChatSwitchLink(`chatswitch://import?data=${mcpData}`).config.envKeys, ["ACCESS_TOKEN"]);
+  assert.equal(parseChatSwitchLink("chatswitch://import?type=skill&source=https%3A%2F%2Fgithub.com%2Fexample%2Fskills").config.source, "https://github.com/example/skills");
+  assert.equal(parseChatSwitchLink("chatswitch://import?type=provider&label=Unsafe&baseUrl=https%3A%2F%2Fexample.test%2Fv1&model=x&apiKey=secret"), null);
+  assert.equal(parseChatSwitchLink("chatswitch://import?type=skill&source=https%3A%2F%2Fexample.com%2Fskills"), null);
 }
 
 function testProviderPresetCatalog() {
@@ -1011,7 +1060,7 @@ function testConfigurationImportExportAndBackup() {
   assert.equal(store.saveAppSettings({ closeToTray: false }).closeToTray, false);
   store.saveAppSettings({ closeToTray: true });
   const bundle = {
-    schema: "share-master-config",
+    schema: "chatswitch-config",
     version: 1,
     relays: [{
       label: "Imported Provider",
@@ -1301,7 +1350,7 @@ async function testScheduledTaskExecution() {
 }
 
 async function testClaudeThreadDeletion() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-claude-delete-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-claude-delete-unit-"));
   const project = path.join(root, "projects", "qa");
   const file = path.join(project, "delete-me.jsonl");
   try {
@@ -1316,8 +1365,9 @@ async function testClaudeThreadDeletion() {
 }
 
 async function testOpenAICompatibleStreaming() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-compatible-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-unit-"));
   const image = path.join(root, "fixture.png");
+  const document = path.join(root, "fixture.txt");
   const requests = [];
   const fetchImpl = async (url, options) => {
     requests.push({ url, options, body: JSON.parse(options.body) });
@@ -1336,6 +1386,7 @@ async function testOpenAICompatibleStreaming() {
   };
   try {
     fs.writeFileSync(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    fs.writeFileSync(document, "文件上下文 fixture", "utf8");
     const server = new OpenAICompatibleServer({
       id: "deepseek-unit",
       label: "DeepSeek unit",
@@ -1352,15 +1403,21 @@ async function testOpenAICompatibleStreaming() {
         if (message.method === "turn/completed") resolve(message);
       });
     });
-    await server.startTurn(created.thread.id, "测试消息", "F:\\codepro", "client-message", { effort: "high" });
+    await server.startTurn(created.thread.id, "测试消息", "F:\\codepro", "client-message", {
+      effort: "high",
+      webSearch: true,
+      fileInputs: [{ path: document, fileName: "fixture.txt" }],
+    });
     const completion = await completed;
     assert.equal(completion.params.turn.status, "completed");
     assert.equal(completion.params.turn.usage.total_tokens, 19);
     assert.equal(requests[0].url, "https://api.deepseek.com/v1/chat/completions");
     assert.equal(requests[0].options.headers.Authorization, "Bearer encrypted-store-value");
     assert.equal(requests[0].body.reasoning_effort, "high");
+    assert.deepEqual(requests[0].body.web_search_options, { search_context_size: "medium" });
     assert.deepEqual(requests[0].body.messages, [{ role: "user", content: "测试消息" }]);
     const read = await server.readThread(created.thread.id);
+    assert.deepEqual(read.thread.turns[0].items[0].content.at(-1), { type: "localFile", path: document, fileName: "fixture.txt" });
     assert.equal(read.thread.turns[0].items.find((item) => item.type === "agentMessage").text, "你好");
     const reasoning = read.thread.turns[0].items.find((item) => item.type === "reasoning");
     assert.equal(reasoning.summary.length, 1);
@@ -1377,6 +1434,7 @@ async function testOpenAICompatibleStreaming() {
       imageInputs: [{ path: image, detail: "auto" }],
     });
     await secondCompleted;
+    assert.equal(Object.hasOwn(requests[1].body, "web_search_options"), false);
     assert.equal(requests[1].body.messages.length, 3);
     assert.deepEqual(requests[1].body.messages.slice(0, 2), [
       { role: "user", content: "测试消息" },
@@ -1384,7 +1442,23 @@ async function testOpenAICompatibleStreaming() {
     ]);
     assert.equal(requests[1].body.messages[2].content[0].text, "第二条");
     assert.match(requests[1].body.messages[2].content[1].image_url.url, /^data:image\/png;base64,/);
-    assert.equal((await server.listThreads()).data[0].id, created.thread.id);
+    const fileOnlyThread = await server.startThread("F:\\codepro", "deepseek-chat");
+    const fileOnlyCompleted = new Promise((resolve) => {
+      const listener = (message) => {
+        if (message.method !== "turn/completed" || message.params.threadId !== fileOnlyThread.thread.id) return;
+        server.off("notification", listener);
+        resolve(message);
+      };
+      server.on("notification", listener);
+    });
+    await server.startTurn(fileOnlyThread.thread.id, "", "F:\\codepro", null, {
+      fileInputs: [{ path: document, fileName: "fixture.txt" }],
+    });
+    await fileOnlyCompleted;
+    assert.deepEqual((await server.readThread(fileOnlyThread.thread.id)).thread.turns[0].items[0].content, [
+      { type: "localFile", path: document, fileName: "fixture.txt" },
+    ]);
+    assert.ok((await server.listThreads()).data.some((thread) => thread.id === created.thread.id));
     assert.equal((await server.listModels()).data[0].id, "deepseek-chat");
     assert.equal(parseSseBlock('data: {"value":1}').value, 1);
     assert.equal(chatCompletionsEndpoint("https://example.com/v1/chat/completions"), "https://example.com/v1/chat/completions");
@@ -1395,7 +1469,7 @@ async function testOpenAICompatibleStreaming() {
 }
 
 async function testOpenAICompatibleFailover() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-compatible-failover-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-failover-"));
   const jsonResponse = (content, status = 200) => new Response(JSON.stringify(
     status === 200
       ? { choices: [{ message: { content } }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } }
@@ -1542,7 +1616,7 @@ async function testOpenAICompatibleFailover() {
 }
 
 async function testOpenAICompatibleCompletionValidation() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-compatible-completion-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-completion-"));
   const encoder = new TextEncoder();
   const responses = [
     [
@@ -1614,7 +1688,7 @@ async function testOpenAICompatibleCompletionValidation() {
 }
 
 async function testOpenAICompatibleInterrupt() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-compatible-interrupt-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-interrupt-"));
   try {
     const fetchImpl = (_url, options) => new Promise((_resolve, reject) => {
       options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -1644,7 +1718,7 @@ async function testOpenAICompatibleInterrupt() {
 }
 
 async function testOpenAICompatibleSharedCodexHistory() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-compatible-history-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-history-"));
   const threadId = "019f0000-1111-7222-8333-444455556666";
   const source = path.join(root, "sessions", "2026", "08", "01", `rollout-${threadId}.jsonl`);
   const requests = [];
@@ -1728,7 +1802,7 @@ async function testOpenAICompatibleSharedCodexHistory() {
 }
 
 async function testImportedLocalConversation() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-local-import-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-local-import-"));
   const conversation = {
     id: "codex-app:F:\\source\\session.jsonl",
     sourceId: "codex",
@@ -1776,6 +1850,13 @@ async function testImportedLocalConversation() {
     assert.equal(first.imported, true);
     assert.equal(first.duplicate, false);
     assert.equal(fs.existsSync(server.threadFile(converted.id)), true);
+    const localOnly = await server.listLocalThreads();
+    assert.equal(localOnly.data.length, 1);
+    assert.equal(localOnly.data[0].id, converted.id);
+    assert.equal(localOnly.data[0]._importedLocalHistory.sourceLabel, "Codex App");
+    assert.deepEqual((await server.readThread(converted.id)).thread.turns[0].items.map((item) => item.type), [
+      "userMessage", "reasoning", "agentMessage",
+    ]);
 
     const continued = server.loadThread(converted.id);
     continued.turns.push({
@@ -1784,7 +1865,7 @@ async function testImportedLocalConversation() {
       items: [{
         id: `${converted.id}-continued-item`,
         type: "agentMessage",
-        text: "Synclattice 中后续产生的内容",
+        text: "ChatSwitch 中后续产生的内容",
         phase: "final_answer",
       }],
     });
@@ -1796,8 +1877,21 @@ async function testImportedLocalConversation() {
     assert.equal(duplicate.imported, false);
     assert.equal(duplicate.duplicate, true);
     assert.equal(duplicate.thread.turns.length, 2);
-    assert.equal(duplicate.thread.turns[1].items[0].text, "Synclattice 中后续产生的内容");
+    assert.equal(duplicate.thread.turns[1].items[0].text, "ChatSwitch 中后续产生的内容");
     assert.equal(JSON.stringify(duplicate.thread).includes("源文件后来新增的内容"), false);
+    const secondConversation = {
+      ...conversation,
+      id: "claude:F:\\source\\other-session.jsonl",
+      sourceId: "claude",
+      sourceLabel: "Claude Code",
+      sessionId: "other-session",
+      title: "另一份记录",
+    };
+    const second = server.importLocalConversation(secondConversation);
+    assert.equal(second.imported, true);
+    assert.equal(second.duplicate, false);
+    assert.notEqual(second.thread.id, converted.id);
+    assert.equal((await server.listLocalThreads()).data.length, 2);
     assert.throws(() => importedLocalThread({ id: "empty", messages: [] }), /没有可复制的消息/);
     server.stop();
   } finally {
@@ -1943,7 +2037,7 @@ function testRootlessProjectMembership() {
 
 function testProjectDeletion() {
   const store = new ProviderStore();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-project-delete-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-project-delete-"));
   try {
     const conversation = path.join(root, "conversation.jsonl");
     fs.writeFileSync(conversation, '{"type":"fixture"}\n', "utf8");
@@ -1965,8 +2059,8 @@ function testProjectDeletion() {
 }
 
 function testClaudeMergedHistoryAndImport() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-claude-unit-"));
-  const configDir = path.join(root, "share-master-claude");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-claude-unit-"));
+  const configDir = path.join(root, "chatswitch-claude");
   const globalRoot = path.join(root, "global-projects");
   const localRoot = path.join(configDir, "projects");
   const localProject = path.join(localRoot, "local-project");
@@ -1998,7 +2092,7 @@ function testClaudeMergedHistoryAndImport() {
 }
 
 async function testClaudeStreamingThreadParse() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-claude-parse-unit-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-claude-parse-unit-"));
   const file = path.join(root, "thread.jsonl");
   try {
     fs.writeFileSync(file, [
@@ -2028,7 +2122,7 @@ async function testClaudeStreamingThreadParse() {
 }
 
 async function testLocalConversationHistoryReader() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-local-history-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-local-history-"));
   try {
     const codexSessions = path.join(home, ".codex", "sessions", "2026", "08", "02");
     const codexArchived = path.join(home, ".codex", "archived_sessions");
@@ -2085,6 +2179,9 @@ async function testLocalConversationHistoryReader() {
     assert.deepEqual(codexPreview.messages.map((message) => message.role), ["user", "reasoning", "assistant"]);
     assert.equal(codexPreview.messages.some((message) => message.text.includes("hidden context")), false);
     assert.equal(fs.readFileSync(codexFile, "utf8"), codexContents);
+    const allCodex = await reader.list({ sourceId: "codex", all: true, limit: 20000 });
+    assert.equal(allCodex.conversations.length, allCodex.total);
+    assert.equal(allCodex.total, 2);
 
     const codexApp = await reader.list({ sourceId: "codex-app-1" });
     assert.equal(codexApp.total, 1);
@@ -2108,7 +2205,7 @@ async function testLocalConversationHistoryReader() {
 }
 
 function testLocalProviderDiscovery() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-local-providers-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-local-providers-"));
   const codexHome = path.join(home, ".codex");
   const claudeHome = path.join(home, ".claude");
   const relayKey = "unit-relay-secret";
@@ -2238,7 +2335,7 @@ function testPersistedMessageQueues() {
 }
 
 async function testInterruptedToolCallRepair() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-integrity-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-integrity-"));
   const threadId = "thread-integrity-fixture";
   const directory = path.join(home, "sessions", "2026", "08", "04");
   const file = path.join(directory, `rollout-2026-08-04T00-00-00-${threadId}.jsonl`);
@@ -2314,6 +2411,8 @@ Promise.resolve()
   .then(testSkillMirror)
   .then(testManagedSkillActivation)
   .then(testPrivateExtensionsStore)
+  .then(testBuiltinApiEditing)
+  .then(testProviderApiKeyFallback)
   .then(testDeepLinks)
   .then(testProviderPresetCatalog)
   .then(testThreadPagination)
@@ -2357,7 +2456,8 @@ Promise.resolve()
   .then(testOpenAICompatibleInterrupt)
   .then(testOpenAICompatibleSharedCodexHistory)
   .then(testImportedLocalConversation)
-  .then(() => console.log(JSON.stringify({ ok: true, tests: 60 })))
+  .then(testClaudeOfficialAuthSettings)
+  .then(() => console.log(JSON.stringify({ ok: true, tests: 63 })))
   .catch((error) => {
     console.error(error.stack || error.message);
     process.exitCode = 1;

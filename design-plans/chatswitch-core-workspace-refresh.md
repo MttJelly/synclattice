@@ -1,4 +1,4 @@
-# Refresh the Synclattice core workspace
+# Refresh the ChatSwitch core workspace
 
 Written against: 84e10832b19584d76a77ab52685085622e6e4d2b
 
@@ -13,7 +13,7 @@ Written against: 84e10832b19584d76a77ab52685085622e6e4d2b
 
 ## Design decision
 
-Unify the core workspace around Synclattice's existing deep-green identity: use one teal accent for selection and primary actions, reserve amber/red for warnings and destructive actions, reduce decorative borders and shadows, and establish a stable hierarchy of chrome, navigation, content, and composer. Keep the product dense and operational rather than card-led. Make the connection manager a clear provider-first master-detail surface, with utility actions visually subordinate. Preserve every existing command, state, ID, model control, and data path.
+Unify the core workspace around ChatSwitch's existing deep-green identity: use one teal accent for selection and primary actions, reserve amber/red for warnings and destructive actions, reduce decorative borders and shadows, and establish a stable hierarchy of chrome, navigation, content, and composer. Keep the product dense and operational rather than card-led. Make the connection manager a clear provider-first master-detail surface, with utility actions visually subordinate. Preserve every existing command, state, ID, model control, and data path.
 
 ## Reuse
 
@@ -48,14 +48,14 @@ No new interaction primitive is required. Existing native controls and dialog ow
 
 ## Validation
 
-- Product: open Synclattice only through the isolated Vue QA window; select a conversation, type while a turn is represented as running, inspect the queue, open provider selection and confirmation surfaces, and confirm all existing commands remain available without touching the user's current window.
+- Product: open ChatSwitch only through the isolated Vue QA window; select a conversation, type while a turn is represented as running, inspect the queue, open provider selection and confirmation surfaces, and confirm all existing commands remain available without touching the user's current window.
 - Interface: inspect desktop, compact, conversation, confirmation, attachment, local-history, provider, and dark screenshots; test long Chinese labels, long reasoning summaries, narrow widths, keyboard focus, reduced motion, overflow, and contrast.
 - System: confirm the final rules reuse existing variables and native controls, do not add a second component system, and do not add gradients, glow effects, or large animated blur surfaces.
 - Repository: `npm run build:renderer && npm run check && npm run test:unit && npm run test:vue-ui` -> generated renderer is current, syntax/unit checks pass, and isolated Vue UI screenshots complete without failure.
 
 ## Stop conditions
 
-- Stop if the requested visual change requires changing renderer behavior, model capability, conversation data, the user's active Synclattice window, or original ChatGPT/Codex application files.
+- Stop if the requested visual change requires changing renderer behavior, model capability, conversation data, the user's active ChatSwitch window, or original ChatGPT/Codex application files.
 
 ## Design documentation
 

@@ -40,7 +40,7 @@ function windowsAppResourceRoots() {
 }
 
 function runtimeRoots() {
-  const explicit = String(process.env.SHARE_MASTER_CODEX_RUNTIME || "").trim();
+  const explicit = String(process.env.CHATSWITCH_CODEX_RUNTIME || "").trim();
   const explicitDirectory = existingDirectory(explicit);
   const explicitFile = existingFile(explicit);
   const roots = [
@@ -55,7 +55,7 @@ function runtimeRoots() {
 const sourceRoot = runtimeRoots()[0];
 const sourceCodex = sourceRoot && existingFile(path.join(sourceRoot, "codex.exe"));
 if (!sourceCodex) {
-  throw new Error("没有找到可打包的 Codex app-server。请安装 ChatGPT/Codex 应用，或设置 SHARE_MASTER_CODEX_RUNTIME。");
+  throw new Error("没有找到可打包的 Codex app-server。请安装 ChatGPT/Codex 应用，或设置 CHATSWITCH_CODEX_RUNTIME。");
 }
 
 const runtimeFiles = fs.readdirSync(sourceRoot)

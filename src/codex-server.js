@@ -16,11 +16,11 @@ const { APP_VERSION } = require("./app-version");
 
 const LEGACY_CODEX_HOME = "G:\\FIle\\codex-file";
 const CODEX_HOME = process.env.CODEX_HOME
-  || (process.env.SHARE_MASTER_PACKAGED !== "1" && fs.existsSync(LEGACY_CODEX_HOME)
+  || (process.env.CHATSWITCH_PACKAGED !== "1" && fs.existsSync(LEGACY_CODEX_HOME)
     ? LEGACY_CODEX_HOME
     : path.join(os.homedir(), ".codex"));
 const CODEX_EXE = findExecutable({
-  override: process.env.SHARE_MASTER_CODEX_EXE,
+  override: process.env.CHATSWITCH_CODEX_EXE,
   candidates: [
     ...packagedCodexCandidates(),
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs", "OpenAI", "Codex", "bin", "codex.exe") : null,
@@ -35,15 +35,15 @@ const ANSI_ESCAPE_PATTERN = /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-
 
 function codexRuntimeRoot() {
   return process.env.LOCALAPPDATA
-    ? path.join(process.env.LOCALAPPDATA, "Synclattice", "runtime", "codex")
-    : path.join(os.tmpdir(), "share-master-runtime", "codex");
+    ? path.join(process.env.LOCALAPPDATA, "ChatSwitch", "runtime", "codex")
+    : path.join(os.tmpdir(), "chatswitch-runtime", "codex");
 }
 
 async function executableForStart(source) {
   if (!isBundledCodexExecutable(source)) return { executable: source, runtimeKind: "codex-cli" };
   const normalized = path.normalize(String(source)).toLowerCase();
   if (normalized.includes(`${path.sep}codex-runtime${path.sep}`)) {
-    return { executable: source, runtimeKind: "synclattice-bundled" };
+    return { executable: source, runtimeKind: "chatswitch-bundled" };
   }
   let stat;
   try {
@@ -249,7 +249,7 @@ class CodexServer extends EventEmitter {
     });
 
     await this.request("initialize", {
-      clientInfo: { name: "synclattice", title: "Synclattice", version: APP_VERSION },
+      clientInfo: { name: "chatswitch", title: "ChatSwitch", version: APP_VERSION },
       capabilities: { experimentalApi: true },
     }, STARTUP_TIMEOUT_MS);
     this.notify("initialized", {});

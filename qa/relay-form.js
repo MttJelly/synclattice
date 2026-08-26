@@ -17,12 +17,12 @@ const result = spawnSync(electron, [`--user-data-dir=${profile}`, root], {
   windowsHide: true,
   env: {
     ...process.env,
-    SHARE_MASTER_STORE_ROOT: store,
-    CODEX_DECK_QA_SCENARIO: "relay-form",
-    CODEX_DECK_QA_SCREENSHOT: screenshot,
-    CODEX_DECK_QA_DELAY: "11000",
-    CODEX_DECK_QA_WIDTH: "1000",
-    CODEX_DECK_QA_HEIGHT: "720",
+    CHATSWITCH_STORE_ROOT: store,
+    CHATSWITCH_QA_SCENARIO: "relay-form",
+    CHATSWITCH_QA_SCREENSHOT: screenshot,
+    CHATSWITCH_QA_DELAY: "11000",
+    CHATSWITCH_QA_WIDTH: "1000",
+    CHATSWITCH_QA_HEIGHT: "720",
   },
 });
 

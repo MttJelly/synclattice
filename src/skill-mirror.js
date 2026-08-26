@@ -41,7 +41,7 @@ async function directoriesMatch(source, target) {
 
 async function syncSkillRoots(sourceDirectories, targetDirectory) {
   const targetRoot = path.resolve(String(targetDirectory || ""));
-  if (!targetDirectory) throw new Error("Synclattice skill target is required.");
+  if (!targetDirectory) throw new Error("ChatSwitch skill target is required.");
   await fsp.mkdir(targetRoot, { recursive: true });
   const result = { copied: 0, skipped: 0, skippedSources: 0, names: [], sources: {} };
   const selectedSkills = new Map();
@@ -97,9 +97,9 @@ function skillDescription(file) {
       .replace(/^---[\s\S]*?---\s*/m, "")
       .split(/\r?\n/)
       .map((line) => line.replace(/^#+\s*/, "").trim())
-      .find(Boolean) || "Synclattice Skill";
+      .find(Boolean) || "ChatSwitch Skill";
   } catch {
-    return "Synclattice Skill";
+    return "ChatSwitch Skill";
   }
 }
 
@@ -155,7 +155,7 @@ async function validateSkillTree(directory) {
 
 async function installSkillSource(sourceDirectory, installedSourceRoot, sourceLabel = "本地导入") {
   const targetRoot = path.resolve(String(installedSourceRoot || ""));
-  if (!installedSourceRoot) throw new Error("Synclattice Skill 安装目录无效。");
+  if (!installedSourceRoot) throw new Error("ChatSwitch Skill 安装目录无效。");
   await fsp.mkdir(targetRoot, { recursive: true });
   const directories = await discoverSkillDirectories(sourceDirectory);
   if (!directories.length) throw new Error("没有找到 SKILL.md（最多扫描 4 层目录）。");
@@ -184,11 +184,11 @@ async function syncManagedSkills(sourceDirectories, libraryDirectory, activeDire
   const libraryRoot = path.resolve(String(libraryDirectory || ""));
   const activeRoot = path.resolve(String(activeDirectory || ""));
   if (!libraryDirectory || !activeDirectory || libraryRoot === activeRoot) {
-    throw new Error("Synclattice skill library and active directory must be different.");
+    throw new Error("ChatSwitch skill library and active directory must be different.");
   }
   let previousSources = {};
   try {
-    previousSources = JSON.parse(await fsp.readFile(path.join(libraryRoot, ".share-master-sources.json"), "utf8")).sources || {};
+    previousSources = JSON.parse(await fsp.readFile(path.join(libraryRoot, ".chatswitch-sources.json"), "utf8")).sources || {};
   } catch {}
   const mirrored = await syncSkillRoots(sourceDirectories, libraryRoot);
   if (!mirrored.names.length && mirrored.skippedSources === (sourceDirectories || []).length) {
@@ -201,12 +201,12 @@ async function syncManagedSkills(sourceDirectories, libraryDirectory, activeDire
     }
   }
   await fsp.writeFile(
-    path.join(libraryRoot, ".share-master-sources.json"),
+    path.join(libraryRoot, ".chatswitch-sources.json"),
     `${JSON.stringify({ version: 1, sources: mirrored.sources }, null, 2)}\n`,
     "utf8",
   );
   await fsp.mkdir(activeRoot, { recursive: true });
-  const manifestFile = path.join(activeRoot, ".share-master-managed.json");
+  const manifestFile = path.join(activeRoot, ".chatswitch-managed.json");
   let previous = [];
   try {
     previous = JSON.parse(await fsp.readFile(manifestFile, "utf8")).names || [];
@@ -246,7 +246,7 @@ async function listManagedSkills(libraryDirectory, disabledNames = []) {
   const entries = await fsp.readdir(libraryRoot, { withFileTypes: true });
   let sources = {};
   try {
-    sources = JSON.parse(await fsp.readFile(path.join(libraryRoot, ".share-master-sources.json"), "utf8")).sources || {};
+    sources = JSON.parse(await fsp.readFile(path.join(libraryRoot, ".chatswitch-sources.json"), "utf8")).sources || {};
   } catch {}
   const skills = [];
   for (const entry of entries) {
@@ -258,7 +258,7 @@ async function listManagedSkills(libraryDirectory, disabledNames = []) {
       description: skillDescription(skillFile),
       path: skillFile,
       enabled: !disabled.has(entry.name.toLocaleLowerCase("en-US")),
-      source: sources[entry.name] || "Synclattice 私有目录",
+      source: sources[entry.name] || "ChatSwitch 私有目录",
     });
   }
   return skills.sort((left, right) => left.name.localeCompare(right.name, "en-US"));

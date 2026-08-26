@@ -5,12 +5,12 @@ const { ClaudeServer } = require("../src/claude-server");
 const { fetchClaudeModels } = require("../src/claude-models");
 const { ProviderStore } = require("../src/provider-store");
 
-app.setName("Synclattice");
+app.setName("ChatSwitch");
 
 async function run() {
   await app.whenReady();
-  const setupKey = String(process.env.SHARE_MASTER_CLAUDE_SETUP_TOKEN || "").trim();
-  delete process.env.SHARE_MASTER_CLAUDE_SETUP_TOKEN;
+  const setupKey = String(process.env.CHATSWITCH_CLAUDE_SETUP_TOKEN || "").trim();
+  delete process.env.CHATSWITCH_CLAUDE_SETUP_TOKEN;
   const store = new ProviderStore();
   if (setupKey) store.saveProviderKey("claude", setupKey);
   const provider = store.resolve("claude");

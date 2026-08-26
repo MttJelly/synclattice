@@ -1,10 +1,10 @@
 {
-  "name": "synclattice",
-  "productName": "Synclattice",
-  "version": "0.1.18",
-  "author": "Synclattice",
+  "name": "chatswitch",
+  "productName": "ChatSwitch",
+  "version": "0.1.19",
+  "author": "ChatSwitch",
   "private": true,
-  "description": "Synclattice: a multi-account, multi-provider desktop client for shared conversation context.",
+  "description": "ChatSwitch: a multi-account, multi-provider desktop client for shared conversation context.",
   "main": "src/main.js",
   "scripts": {
     "build:renderer": "node scripts/build-vue-render.js",
@@ -50,8 +50,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.synclattice.desktop",
-    "productName": "Synclattice",
+    "appId": "com.chatswitch.desktop",
+    "productName": "ChatSwitch",
     "asar": true,
     "npmRebuild": false,
     "directories": {
@@ -85,9 +85,9 @@
     },
     "protocols": [
       {
-        "name": "Synclattice",
+        "name": "ChatSwitch",
         "schemes": [
-          "synclattice"
+          "chatswitch"
         ]
       }
     ],
@@ -97,7 +97,7 @@
         "msi"
       ],
       "icon": "build/icon.ico",
-      "artifactName": "Synclattice-${version}-win-${arch}.${ext}"
+      "artifactName": "ChatSwitch-${version}-win-${arch}.${ext}"
     },
     "msi": {
       "oneClick": false,
@@ -105,7 +105,7 @@
       "runAfterFinish": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Synclattice"
+      "shortcutName": "ChatSwitch"
     }
   }
 }

@@ -341,7 +341,7 @@ function createLocalProviderDiscovery(options = {}) {
   }
 
   function importCandidate(id, providerStore = options.providerStore) {
-    if (!providerStore) throw new Error("Synclattice ProviderStore 尚未初始化。");
+    if (!providerStore) throw new Error("ChatSwitch ProviderStore 尚未初始化。");
     const candidate = candidates.get(String(id || ""));
     if (!candidate) throw new Error("该本机配置候选已过期，请重新扫描。");
     const match = providerMatch(candidate, providerStore);

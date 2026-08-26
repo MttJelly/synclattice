@@ -11,7 +11,7 @@ export function render(_ctx, _cache) {
   const _component_app_confirmation_dialog = _resolveComponent("app-confirmation-dialog")
 
   return (_openBlock(), _createElementBlock(_Fragment, null, [
-    _cache[8] || (_cache[8] = _createStaticVNode("<header class=\"titlebar\"><div class=\"titlebar-brand\"><button id=\"sidebar-toggle\" class=\"icon-button\" type=\"button\" title=\"切换侧栏\" aria-label=\"切换侧栏\"><span data-lucide=\"panel-left\"></span></button><span class=\"wordmark\"><img class=\"wordmark-icon\" src=\"../../build/icon.svg\" alt=\"\" draggable=\"false\"><span>Synclattice</span></span></div><div id=\"window-thread-title\" class=\"window-thread-title\">未选择会话</div><div class=\"titlebar-actions\"><button id=\"workspace-button\" class=\"toolbar-button\" type=\"button\" title=\"选择工作目录\"><span data-lucide=\"folder\"></span><span id=\"workspace-label\">选择工作目录</span></button><button id=\"theme-button\" class=\"icon-button\" type=\"button\" title=\"主题：跟随系统\" aria-label=\"切换主题\"><span data-lucide=\"monitor\"></span></button><button id=\"new-window-button\" class=\"icon-button\" type=\"button\" title=\"新建窗口\" aria-label=\"新建窗口\"><span data-lucide=\"panels-top-left\"></span></button></div></header>", 1)),
+    _cache[8] || (_cache[8] = _createStaticVNode("<header class=\"titlebar\"><div class=\"titlebar-brand\"><button id=\"sidebar-toggle\" class=\"icon-button\" type=\"button\" title=\"切换侧栏\" aria-label=\"切换侧栏\"><span data-lucide=\"panel-left\"></span></button><span class=\"wordmark\"><img class=\"wordmark-icon\" src=\"../../build/icon.svg\" alt=\"\" draggable=\"false\"><span>ChatSwitch</span></span></div><div id=\"window-thread-title\" class=\"window-thread-title\">未选择会话</div><div class=\"titlebar-actions\"><button id=\"workspace-button\" class=\"toolbar-button\" type=\"button\" title=\"选择工作目录\"><span data-lucide=\"folder\"></span><span id=\"workspace-label\">选择工作目录</span></button><button id=\"theme-button\" class=\"icon-button\" type=\"button\" title=\"主题：跟随系统\" aria-label=\"切换主题\"><span data-lucide=\"monitor\"></span></button><button id=\"new-window-button\" class=\"icon-button\" type=\"button\" title=\"新建窗口\" aria-label=\"新建窗口\"><span data-lucide=\"panels-top-left\"></span></button></div></header>", 1)),
     _cache[9] || (_cache[9] = _createElementVNode("aside", { class: "sidebar" }, [
       _createElementVNode("div", { class: "sidebar-top" }, [
         _createElementVNode("button", {
@@ -148,7 +148,7 @@ export function render(_ctx, _cache) {
         "aria-live": "polite"
       }, null, -1 /* CACHED */)),
       _createVNode(_component_attachment_drop_overlay),
-      _cache[7] || (_cache[7] = _createStaticVNode("<section id=\"empty-state\" class=\"empty-state\"><div class=\"empty-symbol\"><span data-lucide=\"terminal-square\"></span></div><h1 id=\"empty-title\">新会话</h1><p id=\"empty-subtitle\">Synclattice</p></section><section id=\"chat-view\" class=\"chat-view hidden\" aria-live=\"polite\"></section>", 2)),
+      _cache[7] || (_cache[7] = _createStaticVNode("<section id=\"empty-state\" class=\"empty-state\"><div class=\"empty-symbol\"><span data-lucide=\"terminal-square\"></span></div><h1 id=\"empty-title\">新会话</h1><p id=\"empty-subtitle\">ChatSwitch</p></section><section id=\"chat-view\" class=\"chat-view hidden\" aria-live=\"polite\"></section>", 2)),
       _createElementVNode("footer", _hoisted_2, [
         _cache[5] || (_cache[5] = _createElementVNode("div", {
           id: "approval-banner",
@@ -246,7 +246,7 @@ export function render(_ctx, _cache) {
               })
             ])
           ], -1 /* CACHED */)),
-          _cache[4] || (_cache[4] = _createStaticVNode("<div class=\"composer-footer\"><div class=\"session-controls\"><button id=\"attach-button\" class=\"skill-button\" type=\"button\" title=\"添加图片附件\" aria-label=\"添加图片附件\" disabled><span data-lucide=\"paperclip\"></span></button><button id=\"skill-button\" class=\"skill-button\" type=\"button\" title=\"Skills\" aria-label=\"Skills\" aria-haspopup=\"menu\" aria-expanded=\"false\" disabled><span data-lucide=\"wand-sparkles\"></span></button><label class=\"session-select\" title=\"会话模型\"><img id=\"composer-brand-icon\" src=\"../../node_modules/simple-icons/icons/openai.svg\" alt=\"\"><select id=\"session-model\" aria-label=\"会话模型\" disabled><option>模型</option></select></label><label class=\"session-select\" title=\"推理强度\"><span data-lucide=\"brain\"></span><select id=\"session-effort\" aria-label=\"推理强度\" disabled><option value=\"high\">高</option></select></label><span id=\"applied-settings\" class=\"applied-settings\" title=\"服务端实际采用的会话设置\">待首轮确认</span></div><div class=\"composer-meta\"><button id=\"mode-badge\" class=\"mode-badge\" type=\"button\" aria-haspopup=\"menu\" aria-expanded=\"false\" disabled><span data-lucide=\"shield-check\"></span><span id=\"approval-mode-label\">请求批准</span><span data-lucide=\"chevron-up\"></span></button><span id=\"connection-badge\"><span class=\"status-dot\"></span>未连接</span></div><div class=\"composer-submit\" aria-label=\"消息操作\"><button id=\"send-button\" class=\"send-button\" type=\"button\" title=\"发送\" aria-label=\"发送\" disabled><span data-lucide=\"arrow-up\"></span></button><button id=\"stop-button\" class=\"stop-button hidden\" type=\"button\" title=\"停止\" aria-label=\"停止\"><span data-lucide=\"square\"></span></button></div></div>", 1))
+          _cache[4] || (_cache[4] = _createStaticVNode("<div class=\"composer-footer\"><div class=\"session-controls\"><button id=\"attach-button\" class=\"skill-button\" type=\"button\" title=\"添加文件上下文\" aria-label=\"添加文件上下文\" disabled><span data-lucide=\"paperclip\"></span></button><button id=\"skill-button\" class=\"skill-button\" type=\"button\" title=\"Skills\" aria-label=\"Skills\" aria-haspopup=\"menu\" aria-expanded=\"false\" disabled><span data-lucide=\"wand-sparkles\"></span></button><label class=\"search-toggle\" title=\"请求模型使用联网搜索\"><input id=\"web-search-input\" type=\"checkbox\" disabled><span data-lucide=\"globe-2\"></span><span>联网搜索</span></label><label class=\"session-select\" title=\"会话模型\"><img id=\"composer-brand-icon\" src=\"../../node_modules/simple-icons/icons/openai.svg\" alt=\"\"><select id=\"session-model\" aria-label=\"会话模型\" disabled><option>模型</option></select></label><label class=\"session-select\" title=\"推理强度\"><span data-lucide=\"brain\"></span><select id=\"session-effort\" aria-label=\"推理强度\" disabled><option value=\"high\">高</option></select></label><span id=\"applied-settings\" class=\"applied-settings\" title=\"服务端实际采用的会话设置\">待首轮确认</span></div><div class=\"composer-meta\"><button id=\"mode-badge\" class=\"mode-badge\" type=\"button\" aria-haspopup=\"menu\" aria-expanded=\"false\" disabled><span data-lucide=\"shield-check\"></span><span id=\"approval-mode-label\">请求批准</span><span data-lucide=\"chevron-up\"></span></button><span id=\"connection-badge\"><span class=\"status-dot\"></span>未连接</span></div><div class=\"composer-submit\" aria-label=\"消息操作\"><button id=\"send-button\" class=\"send-button\" type=\"button\" title=\"发送\" aria-label=\"发送\" disabled><span data-lucide=\"arrow-up\"></span></button><button id=\"stop-button\" class=\"stop-button hidden\" type=\"button\" title=\"停止\" aria-label=\"停止\"><span data-lucide=\"square\"></span></button></div></div>", 1))
         ])
       ])
     ]),
@@ -326,7 +326,15 @@ export function render(_ctx, _cache) {
               type: "button"
             }, [
               _createElementVNode("span", { "data-lucide": "log-in" }),
-              _createTextVNode("登录默认官方账号")
+              _createTextVNode("登录 ChatGPT 官方（Codex）")
+            ]),
+            _createElementVNode("button", {
+              id: "claude-official-entry-button",
+              class: "text-button",
+              type: "button"
+            }, [
+              _createElementVNode("span", { "data-lucide": "bot" }),
+              _createTextVNode("登录 Claude Code 官方")
             ]),
             _createElementVNode("span", {
               id: "provider-local-history-help",
@@ -462,7 +470,7 @@ export function render(_ctx, _cache) {
           _createElementVNode("span", { "data-lucide": "shield-check" }),
           _createElementVNode("div", null, [
             _createElementVNode("strong", null, "原配置保持不变"),
-            _createElementVNode("small", null, "API Key 不会发送到界面；确认导入后，仅加密写入 Synclattice 自己的安全存储。")
+            _createElementVNode("small", null, "API Key 不会发送到界面；确认导入后，仅加密写入 ChatSwitch 自己的安全存储。")
           ])
         ]),
         _createElementVNode("div", { class: "local-provider-toolbar" }, [
@@ -543,7 +551,7 @@ export function render(_ctx, _cache) {
             role: "tab",
             "aria-selected": "false",
             "data-connection-tab": "account"
-          }, "GPT 账号")
+          }, "ChatGPT / Codex 官方")
         ]),
         _createElementVNode("form", {
           id: "relay-form",
@@ -595,7 +603,7 @@ export function render(_ctx, _cache) {
             id: "provider-model-help",
             class: "form-note"
           }, [
-            _createTextVNode("Synclattice 会从中转商的 "),
+            _createTextVNode("ChatSwitch 会从中转商的 "),
             _createElementVNode("code", null, "/models"),
             _createTextVNode(" 或 "),
             _createElementVNode("code", null, "/v1/models"),
@@ -615,8 +623,17 @@ export function render(_ctx, _cache) {
               type: "password",
               required: "",
               autocomplete: "new-password",
-              placeholder: "仅加密保存在本机"
+              placeholder: "请输入 API Key",
+              "aria-describedby": "provider-api-key-help connection-error"
             })
+          ]),
+          _createElementVNode("p", {
+            id: "provider-api-key-help",
+            class: "form-note"
+          }, [
+            _createTextVNode("API Key 仅加密保存在本机。已配置时显示为 "),
+            _createElementVNode("code", null, "********"),
+            _createTextVNode("，不会返回或暴露原文。")
           ]),
           _createElementVNode("div", { class: "model-load-row provider-model-load-row" }, [
             _createElementVNode("button", {
@@ -717,7 +734,7 @@ export function render(_ctx, _cache) {
           _createElementVNode("p", {
             id: "account-label-help",
             class: "form-note"
-          }, "点击后会直接打开 OpenAI 官方 ChatGPT 登录页面。这里不填写邮箱或密码；标签只用于区分多个本地账号。"),
+          }, "点击后会直接打开 OpenAI 官方 ChatGPT 登录页面。这里不填写邮箱或密码；标签只用于区分多个本地账号。Claude Code 使用下方独立入口，不共用 ChatGPT 登录。"),
           _createElementVNode("div", { class: "form-actions" }, [
             _createElementVNode("span", {
               id: "account-error",
@@ -766,6 +783,30 @@ export function render(_ctx, _cache) {
           id: "claude-form",
           class: "connection-form"
         }, [
+          _createElementVNode("section", {
+            class: "official-auth-card",
+            "aria-labelledby": "claude-official-auth-title"
+          }, [
+            _createElementVNode("div", null, [
+              _createElementVNode("strong", { id: "claude-official-auth-title" }, "Anthropic 官方账号"),
+              _createElementVNode("span", null, "使用 Claude Code CLI 打开官方网页登录，不需要在 ChatSwitch 中填写邮箱或密码。")
+            ]),
+            _createElementVNode("button", {
+              id: "claude-official-login-button",
+              class: "secondary-command",
+              type: "button"
+            }, [
+              _createElementVNode("span", { "data-lucide": "log-in" }),
+              _createTextVNode("打开 Claude 官方登录")
+            ]),
+            _createElementVNode("span", {
+              id: "claude-official-login-status",
+              class: "provider-error",
+              role: "status",
+              "aria-live": "polite"
+            })
+          ]),
+          _createElementVNode("p", { class: "form-note" }, "没有 Claude Code CLI 时仍可使用下方 Token / 中转配置；ChatGPT 的官方登录不会替代 Claude Code 登录。"),
           _createElementVNode("label", null, [
             _createElementVNode("span", null, "中转商名称"),
             _createElementVNode("input", {
@@ -822,7 +863,7 @@ export function render(_ctx, _cache) {
           _createElementVNode("p", {
             id: "claude-route-note",
             class: "form-note"
-          }, "Hexuan 的 sonnet/opus/haiku 可能映射到其他厂商模型，Synclattice 会明确显示实际路由。"),
+          }, "Hexuan 的 sonnet/opus/haiku 可能映射到其他厂商模型，ChatSwitch 会明确显示实际路由。"),
           _createElementVNode("div", { class: "form-actions" }, [
             _createElementVNode("span", {
               id: "claude-error",
@@ -904,6 +945,85 @@ export function render(_ctx, _cache) {
             }, [
               _createElementVNode("span", { "data-lucide": "check" }),
               _createTextVNode("应用")
+            ])
+          ])
+        ]),
+        _createElementVNode("section", {
+          class: "conversation-mirror-settings",
+          "aria-labelledby": "conversation-mirror-heading"
+        }, [
+          _createElementVNode("div", { class: "dialog-section-heading" }, [
+            _createElementVNode("strong", { id: "conversation-mirror-heading" }, "Codex 历史副本"),
+            _createElementVNode("span", null, "只读复制到 ChatSwitch")
+          ]),
+          _createElementVNode("p", { class: "form-note" }, "原始 Codex 目录不会被写入。ChatSwitch 会把新增或变更的 JSONL 复制到私有记录目录；这是单向同步，避免两边同时写入造成冲突。"),
+          _createElementVNode("form", {
+            id: "conversation-mirror-form",
+            class: "connection-form"
+          }, [
+            _createElementVNode("label", null, [
+              _createElementVNode("span", null, "Codex 原始记录目录"),
+              _createElementVNode("div", { class: "sync-path-row" }, [
+                _createElementVNode("input", {
+                  id: "conversation-mirror-source",
+                  name: "source",
+                  readonly: "",
+                  placeholder: "选择包含 sessions 的 Codex 目录"
+                }),
+                _createElementVNode("button", {
+                  id: "conversation-mirror-choose",
+                  class: "secondary-command",
+                  type: "button"
+                }, [
+                  _createElementVNode("span", { "data-lucide": "folder-open" }),
+                  _createTextVNode("选择")
+                ])
+              ])
+            ]),
+            _createElementVNode("div", { class: "form-grid-two" }, [
+              _createElementVNode("label", null, [
+                _createElementVNode("span", null, "自动复制间隔"),
+                _createElementVNode("select", {
+                  id: "conversation-mirror-interval",
+                  name: "intervalSeconds"
+                }, [
+                  _createElementVNode("option", { value: "15" }, "每 15 秒"),
+                  _createElementVNode("option", { value: "30" }, "每 30 秒"),
+                  _createElementVNode("option", { value: "60" }, "每 1 分钟"),
+                  _createElementVNode("option", { value: "300" }, "每 5 分钟")
+                ])
+              ]),
+              _createElementVNode("label", { class: "toggle-row" }, [
+                _createElementVNode("input", {
+                  id: "conversation-mirror-enabled",
+                  name: "enabled",
+                  type: "checkbox"
+                }),
+                _createElementVNode("span", null, "启用自动复制")
+              ])
+            ]),
+            _createElementVNode("div", { class: "form-actions" }, [
+              _createElementVNode("span", {
+                id: "conversation-mirror-status",
+                class: "provider-error",
+                role: "status",
+                "aria-live": "polite"
+              }),
+              _createElementVNode("button", {
+                id: "conversation-mirror-now",
+                class: "secondary-command",
+                type: "button"
+              }, [
+                _createElementVNode("span", { "data-lucide": "refresh-cw" }),
+                _createTextVNode("立即复制")
+              ]),
+              _createElementVNode("button", {
+                class: "primary-command",
+                type: "submit"
+              }, [
+                _createElementVNode("span", { "data-lucide": "save" }),
+                _createTextVNode("保存同步")
+              ])
             ])
           ])
         ])
@@ -1083,7 +1203,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "local-history-title" }, "本地聊天记录"),
-            _createElementVNode("p", null, "只读浏览原始会话；需要继续时，可复制到 Synclattice 私有记录。")
+            _createElementVNode("p", null, "只读浏览原始会话；需要继续时，可复制到 ChatSwitch 私有记录。")
           ]),
           _createElementVNode("button", {
             id: "local-history-close-button",
@@ -1109,13 +1229,24 @@ export function render(_ctx, _cache) {
             id: "local-history-summary",
             class: "local-history-summary"
           }, "尚未读取"),
-          _createElementVNode("button", {
-            id: "local-history-refresh-button",
-            class: "secondary-command",
-            type: "button"
-          }, [
-            _createElementVNode("span", { "data-lucide": "refresh-cw" }),
-            _createTextVNode("刷新")
+          _createElementVNode("div", { class: "local-history-toolbar-actions" }, [
+            _createElementVNode("button", {
+              id: "local-history-import-all-button",
+              class: "primary-command",
+              type: "button",
+              disabled: ""
+            }, [
+              _createElementVNode("span", { "data-lucide": "copy-plus" }),
+              _createElementVNode("span", null, "导入扫描到的全部")
+            ]),
+            _createElementVNode("button", {
+              id: "local-history-refresh-button",
+              class: "secondary-command",
+              type: "button"
+            }, [
+              _createElementVNode("span", { "data-lucide": "refresh-cw" }),
+              _createTextVNode("刷新")
+            ])
           ])
         ]),
         _createElementVNode("div", { class: "local-history-browser" }, [
@@ -1141,13 +1272,89 @@ export function render(_ctx, _cache) {
             _createElementVNode("div", { class: "local-history-empty" }, [
               _createElementVNode("span", { "data-lucide": "messages-square" }),
               _createElementVNode("strong", null, "选择一条本地会话"),
-              _createElementVNode("span", null, "预览不会改写原始记录，复制操作会创建独立的 Synclattice 副本。")
+              _createElementVNode("span", null, "预览不会改写原始记录，复制操作会创建独立的 ChatSwitch 副本。")
             ])
           ])
         ])
       ])
     ], -1 /* CACHED */)),
     _cache[17] || (_cache[17] = _createElementVNode("div", {
+      id: "file-preview-overlay",
+      class: "overlay hidden"
+    }, [
+      _createElementVNode("section", {
+        class: "provider-dialog file-preview-dialog",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-labelledby": "file-preview-title",
+        "aria-describedby": "file-preview-meta"
+      }, [
+        _createElementVNode("div", { class: "dialog-heading file-preview-heading" }, [
+          _createElementVNode("span", { class: "dialog-logo file-preview-logo" }, [
+            _createElementVNode("span", { "data-lucide": "file-search-2" })
+          ]),
+          _createElementVNode("div", { class: "file-preview-heading-copy" }, [
+            _createElementVNode("h2", { id: "file-preview-title" }, "文件预览"),
+            _createElementVNode("p", { id: "file-preview-meta" }, "正在读取文件…")
+          ]),
+          _createElementVNode("button", {
+            id: "file-preview-close-button",
+            class: "icon-button dialog-close",
+            type: "button",
+            title: "关闭预览",
+            "aria-label": "关闭预览"
+          }, [
+            _createElementVNode("span", { "data-lucide": "x" })
+          ])
+        ]),
+        _createElementVNode("div", {
+          id: "file-preview-status",
+          class: "file-preview-status",
+          role: "status",
+          "aria-live": "polite"
+        }, "正在读取文件…"),
+        _createElementVNode("div", { class: "file-preview-body" }, [
+          _createElementVNode("iframe", {
+            id: "file-preview-pdf",
+            class: "file-preview-pdf hidden",
+            title: "PDF 文件预览"
+          }),
+          _createElementVNode("article", {
+            id: "file-preview-document",
+            class: "file-preview-document markdown-body hidden"
+          }),
+          _createElementVNode("pre", {
+            id: "file-preview-text",
+            class: "file-preview-text hidden"
+          })
+        ]),
+        _createElementVNode("div", { class: "dialog-actions file-preview-actions" }, [
+          _createElementVNode("span", {
+            id: "file-preview-error",
+            class: "provider-error",
+            role: "status",
+            "aria-live": "polite"
+          }),
+          _createElementVNode("button", {
+            id: "file-preview-open-system",
+            class: "secondary-command",
+            type: "button"
+          }, [
+            _createElementVNode("span", { "data-lucide": "external-link" }),
+            _createTextVNode("用系统程序打开")
+          ]),
+          _createElementVNode("button", {
+            id: "file-preview-done-button",
+            class: "primary-command",
+            type: "button"
+          }, [
+            _createElementVNode("span", { "data-lucide": "check" }),
+            _createTextVNode("完成")
+          ])
+        ])
+      ])
+    ], -1 /* CACHED */)),
+    _cache[18] || (_cache[18] = _createElementVNode("div", {
       id: "health-overlay",
       class: "overlay hidden"
     }, [
@@ -1207,7 +1414,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[18] || (_cache[18] = _createElementVNode("div", {
+    _cache[19] || (_cache[19] = _createElementVNode("div", {
       id: "backup-overlay",
       class: "overlay hidden"
     }, [
@@ -1268,7 +1475,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[19] || (_cache[19] = _createElementVNode("div", {
+    _cache[20] || (_cache[20] = _createElementVNode("div", {
       id: "sync-overlay",
       class: "overlay hidden"
     }, [
@@ -1284,7 +1491,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "sync-title" }, "配置同步"),
-            _createElementVNode("p", null, "同步 Synclattice 配置，不包含 API Key、MCP 密钥或聊天正文。")
+            _createElementVNode("p", null, "同步 ChatSwitch 配置，不包含 API Key、MCP 密钥或聊天正文。")
           ]),
           _createElementVNode("button", {
             id: "sync-close-button",
@@ -1352,7 +1559,7 @@ export function render(_ctx, _cache) {
                 name: "url",
                 type: "url",
                 required: "",
-                placeholder: "https://dav.example.com/synclattice/"
+                placeholder: "https://dav.example.com/chatswitch/"
               })
             ]),
             _createElementVNode("label", null, [
@@ -1441,7 +1648,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[20] || (_cache[20] = _createElementVNode("div", {
+    _cache[21] || (_cache[21] = _createElementVNode("div", {
       id: "extensions-overlay",
       class: "overlay hidden"
     }, [
@@ -1457,7 +1664,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "extensions-title" }, "扩展中心"),
-            _createElementVNode("p", null, "Synclattice 私有 Skills、Prompt 模板与 MCP 连接。")
+            _createElementVNode("p", null, "ChatSwitch 私有 Skills、Prompt 模板与 MCP 连接。")
           ]),
           _createElementVNode("button", {
             id: "extensions-close-button",
@@ -1691,7 +1898,7 @@ export function render(_ctx, _cache) {
               _createElementVNode("div", { class: "extensions-editor-heading" }, [
                 _createElementVNode("div", null, [
                   _createElementVNode("strong", { id: "mcp-editor-title" }, "添加 MCP"),
-                  _createElementVNode("span", null, "配置仅保存在 Synclattice")
+                  _createElementVNode("span", null, "配置仅保存在 ChatSwitch")
                 ]),
                 _createElementVNode("button", {
                   id: "mcp-delete-button",
@@ -1805,7 +2012,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[21] || (_cache[21] = _createElementVNode("div", {
+    _cache[22] || (_cache[22] = _createElementVNode("div", {
       id: "skill-install-overlay",
       class: "overlay hidden"
     }, [
@@ -1821,7 +2028,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "skill-install-title" }, "安装 Skill"),
-            _createElementVNode("p", null, "导入到 Synclattice 私有 Skill 源。")
+            _createElementVNode("p", null, "导入到 ChatSwitch 私有 Skill 源。")
           ]),
           _createElementVNode("button", {
             id: "skill-install-close-button",
@@ -1891,7 +2098,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[22] || (_cache[22] = _createElementVNode("div", {
+    _cache[23] || (_cache[23] = _createElementVNode("div", {
       id: "app-settings-overlay",
       class: "overlay hidden"
     }, [
@@ -1907,7 +2114,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "app-settings-title" }, "应用设置"),
-            _createElementVNode("p", null, "Synclattice 的启动与窗口行为。")
+            _createElementVNode("p", null, "ChatSwitch 的启动与窗口行为。")
           ]),
           _createElementVNode("button", {
             id: "app-settings-close-button",
@@ -1929,7 +2136,7 @@ export function render(_ctx, _cache) {
             ]),
             _createElementVNode("span", null, [
               _createElementVNode("strong", null, "Windows 登录时启动"),
-              _createElementVNode("small", null, "通过 Synclattice 启动脚本打开私有数据目录")
+              _createElementVNode("small", null, "通过 ChatSwitch 启动脚本打开私有数据目录")
             ]),
             _createElementVNode("input", {
               name: "launchAtLogin",
@@ -2000,7 +2207,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[23] || (_cache[23] = _createElementVNode("div", {
+    _cache[24] || (_cache[24] = _createElementVNode("div", {
       id: "deep-link-import-overlay",
       class: "overlay hidden"
     }, [
@@ -2016,7 +2223,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "import-preview-title" }, "检查导入内容"),
-            _createElementVNode("p", { id: "import-preview-description" }, "确认后才会写入 Synclattice 私有配置。")
+            _createElementVNode("p", { id: "import-preview-description" }, "确认后才会写入 ChatSwitch 私有配置。")
           ]),
           _createElementVNode("button", {
             id: "import-preview-close-button",
@@ -2060,7 +2267,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[24] || (_cache[24] = _createElementVNode("div", {
+    _cache[25] || (_cache[25] = _createElementVNode("div", {
       id: "project-overlay",
       class: "overlay hidden"
     }, [
@@ -2154,7 +2361,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[25] || (_cache[25] = _createElementVNode("div", {
+    _cache[26] || (_cache[26] = _createElementVNode("div", {
       id: "credential-overlay",
       class: "overlay hidden"
     }, [
@@ -2218,7 +2425,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[26] || (_cache[26] = _createElementVNode("div", {
+    _cache[27] || (_cache[27] = _createElementVNode("div", {
       id: "rename-overlay",
       class: "overlay hidden"
     }, [
@@ -2234,7 +2441,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "rename-title" }, "重命名会话"),
-            _createElementVNode("p", null, "名称只保存在 Synclattice，不修改原始会话记录。")
+            _createElementVNode("p", null, "名称只保存在 ChatSwitch，不修改原始会话记录。")
           ]),
           _createElementVNode("button", {
             id: "rename-close-button",
@@ -2276,7 +2483,7 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[27] || (_cache[27] = _createElementVNode("div", {
+    _cache[28] || (_cache[28] = _createElementVNode("div", {
       id: "task-overlay",
       class: "overlay hidden"
     }, [
@@ -2292,7 +2499,7 @@ export function render(_ctx, _cache) {
           ]),
           _createElementVNode("div", null, [
             _createElementVNode("h2", { id: "task-title" }, "安排任务"),
-            _createElementVNode("p", null, "到期后由已连接的 Synclattice 自动创建并运行新会话。")
+            _createElementVNode("p", null, "到期后由已连接的 ChatSwitch 自动创建并运行新会话。")
           ]),
           _createElementVNode("button", {
             id: "task-close-button",
@@ -2476,6 +2683,6 @@ export function render(_ctx, _cache) {
         ])
       ])
     ], -1 /* CACHED */)),
-    _cache[28] || (_cache[28] = _createStaticVNode("<div id=\"thread-menu\" class=\"context-menu hidden\"><button type=\"button\" data-action=\"archive\"><span data-lucide=\"archive\"></span>归档</button><button type=\"button\" data-action=\"rename\"><span data-lucide=\"pencil\"></span>重命名</button><button class=\"hidden\" type=\"button\" data-action=\"clear-queue\"><span data-lucide=\"list-x\"></span>清空待发送</button><button class=\"danger-action\" type=\"button\" data-action=\"remove\"><span data-lucide=\"trash-2\"></span>移除会话</button><button class=\"danger-action hidden\" type=\"button\" data-action=\"delete-now\"><span data-lucide=\"circle-x\"></span>立即删除</button></div>", 1))
+    _cache[29] || (_cache[29] = _createStaticVNode("<div id=\"thread-menu\" class=\"context-menu hidden\"><button type=\"button\" data-action=\"archive\"><span data-lucide=\"archive\"></span>归档</button><button type=\"button\" data-action=\"rename\"><span data-lucide=\"pencil\"></span>重命名</button><button type=\"button\" data-action=\"pin\"><span data-lucide=\"pin\"></span>置顶</button><button type=\"button\" data-action=\"favorite\"><span data-lucide=\"star\"></span>收藏</button><button type=\"button\" data-action=\"tag\"><span data-lucide=\"tags\"></span>编辑标签</button><button type=\"button\" data-action=\"export\"><span data-lucide=\"download\"></span>导出会话</button><button class=\"hidden\" type=\"button\" data-action=\"clear-queue\"><span data-lucide=\"list-x\"></span>清空待发送</button><button class=\"danger-action\" type=\"button\" data-action=\"remove\"><span data-lucide=\"trash-2\"></span>移除会话</button><button class=\"danger-action hidden\" type=\"button\" data-action=\"delete-now\"><span data-lucide=\"circle-x\"></span>立即删除</button></div>", 1))
   ], 64 /* STABLE_FRAGMENT */))
 }

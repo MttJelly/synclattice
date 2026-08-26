@@ -1,10 +1,10 @@
-# Synclattice 界面与功能指南
+# ChatSwitch 界面与功能指南
 
 这份指南解释主界面和“选择连接方式”中的每个入口，重点说明它们实际管理什么数据，以及什么时候使用。
 
 ## 1. 开始前
 
-Synclattice 是独立的 Windows 桌面应用，正式安装包自带 OpenAI 连接所需的运行时，不依赖另外安装 Codex CLI 或 ChatGPT/Codex 应用。开发版如果没有内置运行时，才会回退到本机 Codex CLI 或官方应用运行时。没有任何 OpenAI 运行时也不影响 Synclattice 启动，其他 API、中转连接和本地记录功能仍可使用。使用 Claude 官方连接时，需要 Claude Code CLI；DeepSeek、Qwen 和其他兼容服务只需要对应的 API 配置。
+ChatSwitch 是独立的 Windows 桌面应用，正式安装包自带 OpenAI 连接所需的运行时，不依赖另外安装 Codex CLI 或 ChatGPT/Codex 应用。开发版如果没有内置运行时，才会回退到本机 Codex CLI 或官方应用运行时。没有任何 OpenAI 运行时也不影响 ChatSwitch 启动，其他 API、中转连接和本地记录功能仍可使用。使用 Claude 官方连接时，需要 Claude Code CLI；DeepSeek、Qwen 和其他兼容服务只需要对应的 API 配置。
 
 首次打开后，先点击左下角连接选择器，完成至少一个连接，再创建 Project 和会话。
 
@@ -12,11 +12,11 @@ Synclattice 是独立的 Windows 桌面应用，正式安装包自带 OpenAI 连
 
 ### 新会话
 
-创建一个新的 Synclattice 会话。当前 Project、连接、模型和推理设置会应用到新会话。
+创建一个新的 ChatSwitch 会话。当前 Project、连接、模型和推理设置会应用到新会话。
 
 ### 搜索聊天记录
 
-搜索 Synclattice 自己保存的会话标题和消息。它不会修改原始 Codex、Claude 或 ChatGPT 记录。
+搜索 ChatSwitch 自己保存的会话标题和消息。它不会修改原始 Codex、Claude 或 ChatGPT 记录。
 
 ### Project 与会话列表
 
@@ -41,15 +41,23 @@ Project 用于按工作主题整理会话。会话支持搜索、归档、恢复
 
 扫描本机的 Codex CLI、Codex App、Claude Code 和兼容配置。
 
-使用方式：点击扫描，勾选需要的项目，再点击“导入所选配置”。扫描阶段只读原文件；确认导入后，密钥才会加密写入 Synclattice 私有存储。原始配置不会被改写。
+使用方式：点击扫描，勾选需要的项目，再点击“导入所选配置”。扫描阶段只读原文件；确认导入后，密钥才会加密写入 ChatSwitch 私有存储。原始配置不会被改写。
 
-### 登录默认官方账号
+### 登录 ChatGPT / Codex 官方账号
 
-为默认 OpenAI/Codex 连接启动官方登录流程。登录按钮会打开官方网页，不需要在 Synclattice 中填写 ChatGPT 邮箱或密码。未完成认证时不能进入聊天界面。
+为 OpenAI/Codex 连接启动官方登录流程。按钮会打开 OpenAI 官方 ChatGPT 网页，不需要在 ChatSwitch 中填写邮箱或密码。未完成认证时不能进入聊天界面。
+
+### 登录 Claude Code 官方账号
+
+在连接管理中选择“登录 Claude Code 官方”，或打开 Claude Code 配置后点击“打开 Claude 官方登录”。ChatSwitch 会调用本机 Claude Code CLI 的 `auth login`，并在浏览器中打开 Anthropic 官方认证页面；两套登录彼此独立，Claude Code 不使用 ChatGPT/Codex OAuth。完成认证后才会建立 Claude 会话；没有 Claude Code CLI 时，请改用 Token 或中转配置。
 
 ### 记录位置
 
-查看或切换 Synclattice 自己的聊天记录目录。切换目录不会移动或删除原目录中的记录。
+查看或切换 ChatSwitch 自己的聊天记录目录。切换目录不会移动或删除原目录中的记录。
+
+在同一页的“Codex 历史副本”区域，可以选择包含 `sessions` 的 Codex 原始目录，设置 15 秒、30 秒、1 分钟或 5 分钟的复制间隔，并立即执行一次复制。副本写入 ChatSwitch 私有记录目录，原始 Codex 文件始终只读；这是单向复制，不会把 ChatSwitch 新消息反向写回 Codex 原生 JSONL。
+
+模型回复中的 PDF、Word、Excel、PowerPoint、文本、JSON、CSV 和 ZIP 文件路径会显示“打开文件”按钮，点击后使用 Windows 默认程序打开。ChatSwitch 只允许打开本机绝对路径和受支持的文件类型。
 
 不要把正在使用的记录目录直接放入坚果云、OneDrive 等实时同步目录。SQLite、WAL 和 SHM 文件在多台设备同时写入时可能产生冲突。
 
@@ -69,17 +77,17 @@ Project 用于按工作主题整理会话。会话支持搜索、归档、恢复
 
 ### 用量与成本
 
-查看 Synclattice 本机记录的请求数量、Token、价格和成本估算。这里的成本来自本地统计和你填写的价格，不等于供应商账单。
+查看 ChatSwitch 本机记录的请求数量、Token、价格和成本估算。这里的成本来自本地统计和你填写的价格，不等于供应商账单。
 
 OpenAI 官方账号的套餐、Codex 剩余额度和下次重置时间，显示在官方账号连接下方的账号面板，不在本入口中显示。
 
 ### 导入
 
-导入 Synclattice 配置文件，适合换电脑或恢复配置。导入前会显示预览；API Key、Token、密码和凭据字段不会从外部链接导入，需要在本机重新配置。
+导入 ChatSwitch 配置文件，适合换电脑或恢复配置。导入前会显示预览；API Key、Token、密码和凭据字段不会从外部链接导入，需要在本机重新配置。
 
 ### 导出
 
-把 Synclattice 的连接结构、Project、Prompt 和 MCP 结构导出为配置文件。导出文件不包含 API Key、Token、登录状态或聊天正文，适合迁移配置，不是聊天记录备份。
+把 ChatSwitch 的连接结构、Project、Prompt 和 MCP 结构导出为配置文件。导出文件不包含 API Key、Token、登录状态或聊天正文，适合迁移配置，不是聊天记录备份。
 
 ### 备份
 
@@ -87,7 +95,7 @@ OpenAI 官方账号的套餐、Codex 剩余额度和下次重置时间，显示�
 
 ### 同步
 
-同步 Synclattice 配置，支持同步目录和 WebDAV。
+同步 ChatSwitch 配置，支持同步目录和 WebDAV。
 
 1. 打开“同步”，选择“同步目录”或“WebDAV”。
 2. 填写目录或 WebDAV URL、用户名和密码。
@@ -113,4 +121,4 @@ OpenAI 官方账号的套餐、Codex 剩余额度和下次重置时间，显示�
 
 ## 5. 数据边界
 
-Synclattice 的私有会话、配置和缓存与原始客户端独立。浏览本地 Codex、Codex App 或 Claude Code 记录时是只读操作；复制到 Synclattice 后，副本才属于 Synclattice，后续修改不会写回原始客户端。
+ChatSwitch 的私有会话、配置和缓存与原始客户端独立。浏览本地 Codex、Codex App 或 Claude Code 记录时是只读操作；在“本地聊天记录”窗口可以按条复制，也可以点击“导入当前来源全部”批量创建 ChatSwitch 私有副本，重复副本会自动跳过。复制到 ChatSwitch 后，副本才属于 ChatSwitch，后续修改不会写回原始客户端。

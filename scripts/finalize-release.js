@@ -15,17 +15,17 @@ function renameArtifact(sourceName, targetName) {
 }
 
 renameArtifact(
-  `Synclattice-${version}-win-x64.zip`,
-  `Synclattice-${version}-portable-win-x64.zip`,
+  `ChatSwitch-${version}-win-x64.zip`,
+  `ChatSwitch-${version}-portable-win-x64.zip`,
 );
 renameArtifact(
-  `Synclattice-${version}-win-x64.msi`,
-  `Synclattice-${version}-setup-win-x64.msi`,
+  `ChatSwitch-${version}-win-x64.msi`,
+  `ChatSwitch-${version}-setup-win-x64.msi`,
 );
 
 const aliases = [
-  [`Synclattice-${version}-portable-win-x64.zip`, "Synclattice-portable-win-x64.zip"],
-  [`Synclattice-${version}-setup-win-x64.msi`, "Synclattice-setup-win-x64.msi"],
+  [`ChatSwitch-${version}-portable-win-x64.zip`, "ChatSwitch-portable-win-x64.zip"],
+  [`ChatSwitch-${version}-setup-win-x64.msi`, "ChatSwitch-setup-win-x64.msi"],
 ];
 for (const [versionedName, stableName] of aliases) {
   const source = path.join(releaseRoot, versionedName);

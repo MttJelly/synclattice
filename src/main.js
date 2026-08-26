@@ -4,7 +4,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { fileURLToPath } = require("node:url");
+const { fileURLToPath, pathToFileURL } = require("node:url");
 const { APP_VERSION, LATEST_RELEASE_API, USER_AGENT, updateFromRelease } = require("./app-version");
 const {
   ApprovalRequestRegistry,
@@ -18,54 +18,55 @@ const {
   windowsTaskbarDetails,
 } = require("./windows-notification-identity");
 
-const WINDOWS_PACKAGED_APP_ID = "com.synclattice.desktop";
+const WINDOWS_PACKAGED_APP_ID = "com.chatswitch.desktop";
 const WINDOWS_APP_ID = app.isPackaged ? WINDOWS_PACKAGED_APP_ID : `${WINDOWS_PACKAGED_APP_ID}.dev`;
 const WINDOWS_TOAST_ACTIVATOR_CLSID = "{E6B8F4D5-4A0D-4B9F-8E3B-3C0F5C3E6D21}";
-app.setName("Synclattice");
-// New launchers use the Synclattice-prefixed environment names. Keep the
-// legacy aliases only as an internal compatibility bridge for existing data.
-if (process.env.SYNCLATTICE_STORE_ROOT) process.env.SHARE_MASTER_STORE_ROOT = process.env.SYNCLATTICE_STORE_ROOT;
-if (process.env.SYNCLATTICE_SKILL_SOURCES) process.env.SHARE_MASTER_SKILL_SOURCES = process.env.SYNCLATTICE_SKILL_SOURCES;
-// Keep the existing store stable across the product rename. Electron derives
-// userData from the display name unless it is pinned explicitly.
+app.setName("ChatSwitch");
+// Upgrade existing installations into the new Electron profile. Copying the
+// whole profile preserves the Windows safeStorage encryption context.
 if (app.isPackaged) {
   const appDataRoot = app.getPath("appData");
-  const synclatticeUserData = path.join(appDataRoot, "Synclattice");
-  const legacyUserData = path.join(appDataRoot, "Share Master");
-  if (!fs.existsSync(synclatticeUserData) && fs.existsSync(legacyUserData)) {
-    try {
-      fs.cpSync(legacyUserData, synclatticeUserData, { recursive: true, errorOnExist: false });
-    } catch (error) {
-      console.warn(`[migration] unable to copy legacy data: ${error.message}`);
+  const chatSwitchUserData = path.join(appDataRoot, "ChatSwitch");
+  if (!fs.existsSync(chatSwitchUserData)) {
+    const previousProfiles = ["Synclattice", "Share Master"]
+      .map((name) => path.join(appDataRoot, name));
+    const legacyUserData = previousProfiles.find((directory) => fs.existsSync(directory));
+    if (legacyUserData) {
+      try {
+        fs.cpSync(legacyUserData, chatSwitchUserData, { recursive: true, errorOnExist: false });
+      } catch (error) {
+        console.warn(`[migration] unable to copy previous profile: ${error.message}`);
+      }
     }
   }
-  app.setPath("userData", fs.existsSync(synclatticeUserData) ? synclatticeUserData : legacyUserData);
+  fs.mkdirSync(chatSwitchUserData, { recursive: true });
+  app.setPath("userData", chatSwitchUserData);
 }
 app.setAppUserModelId(WINDOWS_APP_ID);
 if (process.platform === "win32") app.setToastActivatorCLSID(WINDOWS_TOAST_ACTIVATOR_CLSID);
 if (app.isPackaged) {
-  process.env.SHARE_MASTER_PACKAGED = "1";
+  process.env.CHATSWITCH_PACKAGED = "1";
   // A packaged install owns its data directory. Do not let a stale developer
   // environment variable point the released app at another installation.
-  process.env.SHARE_MASTER_STORE_ROOT = path.join(app.getPath("userData"), "data");
-  // Keep the bundled app-server state private to Synclattice. External Codex
+  process.env.CHATSWITCH_STORE_ROOT = path.join(app.getPath("userData"), "data");
+  // Keep the bundled app-server state private to ChatSwitch. External Codex
   // credentials and sessions are discovered only through explicit import/read-only flows.
   process.env.CODEX_HOME = path.join(app.getPath("userData"), "data", "codex");
 }
 
 const { CodexServer, CODEX_EXE, CODEX_HOME } = require("./codex-server");
-const { ClaudeServer } = require("./claude-server");
+const { ClaudeServer, CLAUDE_EXE, claudeAuthEnvironment, claudeAuthStatus } = require("./claude-server");
 const { OpenAICompatibleServer } = require("./openai-compatible-server");
 const { fetchClaudeModels, fetchClaudeModelsSafely } = require("./claude-models");
 const { fetchOpenAIModels } = require("./openai-models");
-const { ProviderStore, providerPresetCatalog, reasoningProfile } = require("./provider-store");
+const { ProviderStore, providerApiKey, providerPresetCatalog, reasoningProfile } = require("./provider-store");
 const { fetchRelayBalance } = require("./relay-balance");
 const { executeScheduledTask, finalizeScheduledTask } = require("./scheduled-task-runner");
 const { syncConversationMirrors } = require("./conversation-mirror");
 const { createLocalHistoryReader } = require("./local-conversation-history");
 const { createLocalProviderDiscovery } = require("./local-provider-discovery");
 const { installSkillSource, listManagedSkills, syncManagedSkills } = require("./skill-mirror");
-const { parseSynclatticeLink, synclatticeLinkFromArgs } = require("./deep-link");
+const { parseChatSwitchLink, chatSwitchLinkFromArgs } = require("./deep-link");
 const {
   buildContinuationPrompt,
   mergeLogicalThread,
@@ -102,6 +103,8 @@ const serverBranchLookups = new WeakMap();
 const serverNativeThreads = new WeakMap();
 const approvalRequestRegistry = new ApprovalRequestRegistry();
 let conversationMirrorSync = null;
+let conversationMirrorTimer = null;
+let conversationMirrorLastResult = null;
 let skillRefreshPromise = null;
 const INTERACTIVE_SERVER_REQUESTS = new Set([
   "item/commandExecution/requestApproval",
@@ -209,7 +212,7 @@ function handleRendererIpc(channel, handler) {
       return await handler(...args);
     } catch (error) {
       return {
-        __shareMasterIpcError: {
+        __chatSwitchIpcError: {
           message: String(error?.message || error || "未知错误").slice(0, 2000),
           code: error?.code || null,
           status: Number.isFinite(Number(error?.status)) ? Number(error.status) : null,
@@ -263,7 +266,7 @@ function registerApprovalRequest(server, message, mappedMessage, sender, send) {
   const notification = new Notification({
     id: `approval-${crypto.randomUUID()}`,
     groupId: "threadlattice-approvals",
-    groupTitle: "Synclattice 授权请求",
+    groupTitle: "ChatSwitch 授权请求",
     title: spec.title,
     body: spec.body,
     actions: spec.actions,
@@ -301,7 +304,7 @@ function loginItemOptions(openAtLogin = undefined) {
       args: [],
     };
   }
-  const launcher = path.join(path.resolve(__dirname, ".."), "Start Synclattice.cmd");
+  const launcher = path.join(path.resolve(__dirname, ".."), "Start ChatSwitch.cmd");
   return {
     ...(typeof openAtLogin === "boolean" ? { openAtLogin } : {}),
     path: process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe",
@@ -355,7 +358,7 @@ function execFilePromise(file, args, options = {}) {
 }
 
 async function providerEnvironment() {
-  if (process.env.SHARE_MASTER_STORE_ROOT) return {};
+  if (process.env.CHATSWITCH_STORE_ROOT) return {};
   const [niubi, hexuan] = await Promise.all([
     userEnvironmentVariable("NIUBI_API_KEY"),
     userEnvironmentVariable("HEXUAN_API_KEY"),
@@ -386,19 +389,13 @@ async function checkApplicationUpdate() {
   try { return await applicationUpdateCheck; } finally { applicationUpdateCheck = null; }
 }
 
-function apiKeyForProvider(provider, environment) {
-  const keyName = provider.envKey;
-  if (keyName) return provider.env?.[keyName] || environment[keyName] || null;
-  return Object.values(provider.env || {})[0] || null;
-}
-
 async function accountSnapshot(server) {
   if (!isOfficialProvider(server.provider)) {
     return { account: null, requiresOpenaiAuth: false, rateLimits: null };
   }
-  if (process.env.SHARE_MASTER_QA === "1" && process.env.CODEX_DECK_QA_OFFICIAL_AUTHENTICATED === "1") {
+  if (process.env.CHATSWITCH_QA === "1" && process.env.CHATSWITCH_QA_OFFICIAL_AUTHENTICATED === "1") {
     return {
-      account: { type: "chatgpt", email: "qa@share-master.test", planType: "plus" },
+      account: { type: "chatgpt", email: "qa@chatswitch.test", planType: "plus" },
       requiresOpenaiAuth: true,
       rateLimits: { groups: [], resetCredits: 0 },
       accountUsage: null,
@@ -511,12 +508,49 @@ async function loginOfficialAccount(provider) {
   }
 }
 
+async function loginClaudeOfficial(provider) {
+  if (!CLAUDE_EXE || !fs.existsSync(CLAUDE_EXE)) {
+    throw new Error("未找到 Claude Code CLI。请先安装 Claude Code，再使用 Claude 官方登录。此入口不会要求你填写账号或密码。");
+  }
+  const configDir = provider.claudeConfigDir;
+  fs.mkdirSync(configDir, { recursive: true });
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(CLAUDE_EXE, ["auth", "login", "--claudeai"], {
+      env: claudeAuthEnvironment(configDir),
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(value);
+    };
+    child.once("error", (error) => finish(new Error(`无法启动 Claude Code 官方登录：${error.message}`)));
+    child.once("exit", (code) => {
+      if (code === 0) finish(null, { code });
+      else finish(new Error(`Claude Code 官方登录未完成（退出代码 ${code ?? "未知"}）。`));
+    });
+  });
+  const status = await claudeAuthStatus(configDir);
+  if (!status?.loggedIn) throw new Error("Claude Code 登录未完成，请在浏览器中完成 Anthropic 官方认证后重试。");
+  const configured = providerStore.saveClaudeSettings({
+    baseUrl: provider.baseUrl || "https://api.anthropic.com/v1",
+    model: provider.model || "fable",
+    vendorLabel: "Anthropic 官方",
+    authMode: "oauth",
+  });
+  broadcastStoreSnapshot();
+  return { provider: configured, status, result };
+}
+
 function createWindow(providerId = null, projectRoot = null, threadId = null, projectId = null, workspace = null) {
   const initialTitleBar = TITLE_BAR_OVERLAYS.light;
   const icon = applicationIcon();
   const window = new BrowserWindow({
-    width: Number(process.env.CODEX_DECK_QA_WIDTH || 1380),
-    height: Number(process.env.CODEX_DECK_QA_HEIGHT || 900),
+    width: Number(process.env.CHATSWITCH_QA_WIDTH || 1380),
+    height: Number(process.env.CHATSWITCH_QA_HEIGHT || 900),
     minWidth: 900,
     minHeight: 640,
     backgroundColor: initialTitleBar.color,
@@ -537,7 +571,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
   lastActiveWindow = window;
   window.on("focus", () => { lastActiveWindow = window; });
   window.on("close", (event) => {
-    if (quitting || process.env.CODEX_DECK_QA_SCREENSHOT || providerStore?.appSettings().closeToTray === false) return;
+    if (quitting || process.env.CHATSWITCH_QA_SCREENSHOT || providerStore?.appSettings().closeToTray === false) return;
     event.preventDefault();
     window.hide();
     refreshTrayMenu();
@@ -551,12 +585,12 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
       ...(threadId ? { thread: threadId } : {}),
     },
   });
-  if (process.env.CODEX_DECK_QA_SCREENSHOT) {
+  if (process.env.CHATSWITCH_QA_SCREENSHOT) {
     window.webContents.on("console-message", (_event, level, message) => {
       if (level >= 2) console.error(`[renderer:${level}] ${message}`);
     });
     window.webContents.once("did-finish-load", () => {
-      if (process.env.CODEX_DECK_QA_SCENARIO === "request-user-input") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "request-user-input") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.send("codex:approval", {
@@ -582,7 +616,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           });
         }, 1800);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "mcp-form") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "mcp-form") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.send("codex:approval", {
@@ -608,10 +642,10 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           });
         }, 1800);
       }
-      if (["view-archived", "view-removed"].includes(process.env.CODEX_DECK_QA_SCENARIO)) {
+      if (["view-archived", "view-removed"].includes(process.env.CHATSWITCH_QA_SCENARIO)) {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
-          const view = process.env.CODEX_DECK_QA_SCENARIO === "view-archived" ? "archived" : "removed";
+          const view = process.env.CHATSWITCH_QA_SCENARIO === "view-archived" ? "archived" : "removed";
           window.webContents.executeJavaScript(`(async () => {
             document.querySelector('[data-thread-view="${view}"]').click();
             await new Promise((resolve) => setTimeout(resolve, 150));
@@ -620,7 +654,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           })()`).catch((error) => console.error(`[qa:${view}] ${error.message}`));
         }, 1800);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "open-recorded-niubi") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "open-recorded-niubi") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`(async () => {
@@ -631,14 +665,14 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           })()`).catch((error) => console.error(`[qa:open-recorded-niubi] ${error.message}`));
         }, 1800);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "account-panel") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "account-panel") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`document.querySelector('#provider-switch').click()`)
             .catch((error) => console.error(`[qa:account-panel] ${error.message}`));
         }, 3500);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "rename-dialog") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "rename-dialog") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`(() => {
@@ -650,14 +684,14 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
             .catch((error) => console.error(`[qa:rename-dialog] ${error.message}`));
         }, 3500);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "claude-model-fallback") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "claude-model-fallback") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`document.querySelector('[data-provider="claude"]').click()`)
             .catch((error) => console.error(`[qa:claude-model-fallback] ${error.message}`));
         }, 1800);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "relay-form") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "relay-form") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`(async () => {
@@ -667,11 +701,11 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
               form.elements.label.value = 'QA Relay Form';
               form.elements.baseUrl.value = 'https://relay.example/v1';
               const modelSelect = form.elements.model;
-              window.shareMasterState.probedProviderModels = ['gpt-test'];
+              window.chatSwitchState.probedProviderModels = ['gpt-test'];
               modelSelect.replaceChildren(new Option('gpt-test', 'gpt-test'));
               modelSelect.disabled = false;
               modelSelect.value = 'gpt-test';
-              form.elements.apiKey.value = 'share-master-relay-qa-key';
+              form.elements.apiKey.value = 'chatswitch-relay-qa-key';
               form.requestSubmit();
               const started = Date.now();
               while (Date.now() - started < 10000) {
@@ -730,7 +764,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           })()`).catch((error) => console.error(`[qa:relay-form] ${error.message}`));
         }, 1800);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "model-settings") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "model-settings") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`(async () => {
@@ -805,7 +839,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           })()`).catch((error) => console.error(`[qa:model-settings] ${error.message}`));
         }, 3000);
       }
-      if (process.env.CODEX_DECK_QA_SCENARIO === "thread-actions") {
+      if (process.env.CHATSWITCH_QA_SCENARIO === "thread-actions") {
         setTimeout(() => {
           if (window.isDestroyed() || window.webContents.isDestroyed()) return;
           window.webContents.executeJavaScript(`(async () => {
@@ -893,7 +927,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           const image = await window.webContents.capturePage();
           const png = image.toPNG();
           if (!png.length) throw new Error("capturePage returned an empty image.");
-          fs.writeFileSync(process.env.CODEX_DECK_QA_SCREENSHOT, png);
+          fs.writeFileSync(process.env.CHATSWITCH_QA_SCREENSHOT, png);
           const summary = await window.webContents.executeJavaScript(`({
             title: document.title,
             text: document.body.innerText.slice(0, 800),
@@ -941,7 +975,7 @@ function createWindow(providerId = null, projectRoot = null, threadId = null, pr
           for (const server of servers.values()) server.stop();
           setTimeout(() => app.exit(0), 50);
         }
-      }, Number(process.env.CODEX_DECK_QA_DELAY || 3500));
+      }, Number(process.env.CHATSWITCH_QA_DELAY || 3500));
     });
   }
   window.on("closed", () => {
@@ -986,7 +1020,7 @@ function navigateApp(payload) {
 }
 
 function openDeepLink(rawLink) {
-  const link = parseSynclatticeLink(rawLink);
+  const link = parseChatSwitchLink(rawLink);
   if (!link) return false;
   if (!providerStore) {
     pendingDeepLinks.push(rawLink);
@@ -1033,7 +1067,7 @@ function refreshTrayMenu() {
   const runningCount = runningScheduledTasks.size;
   const enabledCount = tasks.filter((task) => task.enabled).length;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "显示 Synclattice", click: () => showAppWindow() },
+    { label: "显示 ChatSwitch", click: () => showAppWindow() },
     { label: "新会话", click: () => navigateApp({ action: "new-chat" }) },
     {
       label: `连接 (${providers.length})`,
@@ -1048,7 +1082,7 @@ function refreshTrayMenu() {
     },
     { type: "separator" },
     {
-      label: "退出 Synclattice",
+      label: "退出 ChatSwitch",
       click: () => {
         quitting = true;
         for (const window of BrowserWindow.getAllWindows()) window.destroy();
@@ -1059,12 +1093,12 @@ function refreshTrayMenu() {
 }
 
 async function createTray() {
-  if (tray || process.env.CODEX_DECK_QA_SCREENSHOT) return;
+  if (tray || process.env.CHATSWITCH_QA_SCREENSHOT) return;
   const icon = !app.isPackaged && fs.existsSync(DEVELOPMENT_ICON)
     ? nativeImage.createFromPath(DEVELOPMENT_ICON).resize({ width: 32, height: 32, quality: "best" })
     : await app.getFileIcon(process.execPath, { size: "small" });
   tray = new Tray(icon);
-  tray.setToolTip("Synclattice");
+  tray.setToolTip("ChatSwitch");
   tray.on("click", () => showAppWindow());
   refreshTrayMenu();
 }
@@ -1116,6 +1150,10 @@ async function rendererWindowSummary(window) {
     threadCount: Number(document.querySelector('#active-thread-count').textContent || 0),
     overlayHidden: document.querySelector('#provider-overlay').classList.contains('hidden'),
     credentialVisible: !document.querySelector('#credential-overlay').classList.contains('hidden'),
+    connectionConfigVisible: !document.querySelector('#connection-overlay').classList.contains('hidden'),
+    relayApiKeyValue: document.querySelector('#relay-form [name="apiKey"]')?.value || '',
+    relayApiKeyRequired: Boolean(document.querySelector('#relay-form [name="apiKey"]')?.required),
+    relayApiKeyHelp: document.querySelector('#provider-api-key-help')?.textContent.trim() || '',
     claudeConfigVisible: !document.querySelector('#claude-overlay').classList.contains('hidden'),
     recordHomeVisible: !document.querySelector('#record-home-overlay').classList.contains('hidden'),
     projectConfigVisible: !document.querySelector('#project-overlay').classList.contains('hidden'),
@@ -1129,7 +1167,7 @@ async function rendererWindowSummary(window) {
 }
 
 async function runMultiProviderWindowQa(firstWindow) {
-  const outputDirectory = process.env.CODEX_DECK_QA_OUTPUT_DIR;
+  const outputDirectory = process.env.CHATSWITCH_QA_OUTPUT_DIR;
   try {
     await waitForQaStep("first window official connection", async () => {
       if (servers.get(firstWindow.webContents.id)?.provider.id !== "official") return false;
@@ -1199,11 +1237,14 @@ async function runMultiProviderWindowQa(firstWindow) {
       return servers.get(unavailableWindow.webContents.id)?.provider.id === "official" && summary.connection.includes("已连接");
     }, 30000);
     await unavailableWindow.webContents.executeJavaScript(`document.querySelector('[data-provider="niubi"]').click()`);
-    const unavailableSummary = await waitForQaStep("missing NIUBI key is reported", async () => {
+    const unavailableSummary = await waitForQaStep("missing NIUBI key opens configuration", async () => {
       const summary = await rendererWindowSummary(unavailableWindow);
-      return summary.providerError.includes("NIUBI_API_KEY")
-        && summary.credentialVisible
-        && summary.connection.includes("未连接")
+      return summary.connectionConfigVisible
+        && !summary.relayApiKeyValue
+        && summary.relayApiKeyRequired
+        && summary.relayApiKeyHelp.includes("尚未配置可用的 API Key")
+        && summary.connection.includes("已连接")
+        && servers.get(unavailableWindow.webContents.id)?.provider.id === "official"
         ? summary
         : false;
     });
@@ -1227,8 +1268,8 @@ async function runMultiProviderWindowQa(firstWindow) {
       claudeConfigurationReturn: true,
       recordHomeReturn: true,
       projectConfigurationReturn: true,
-      unavailableProviderError: unavailableSummary.providerError,
-      unavailableCredentialVisible: unavailableSummary.credentialVisible,
+      unavailableProviderError: unavailableSummary.relayApiKeyHelp,
+      unavailableCredentialVisible: unavailableSummary.connectionConfigVisible,
       unavailableConnection: unavailableSummary.connection,
       internalProviders: windows.map((window) => servers.get(window.webContents.id)?.provider.id || null),
       windows: summaries,
@@ -1243,7 +1284,7 @@ async function runMultiProviderWindowQa(firstWindow) {
 
 function serverFor(event) {
   const server = servers.get(event.sender.id);
-  if (!server?.ready) throw new Error("请先在 Synclattice 中选择连接。");
+  if (!server?.ready) throw new Error("请先在 ChatSwitch 中选择连接。");
   return server;
 }
 
@@ -1256,8 +1297,8 @@ function sharedHistoryReaders() {
   if (sharedHistoryHome !== home || !sharedCompatibleHistory || !sharedClaudeHistory) {
     sharedHistoryHome = home;
     sharedCompatibleHistory = new OpenAICompatibleServer({
-      id: "synclattice-history",
-      label: "Synclattice History",
+      id: "chatswitch-history",
+      label: "ChatSwitch History",
       baseUrl: "https://history.invalid/v1",
       model: "history",
       apiKey: "history-reader",
@@ -1787,6 +1828,8 @@ async function startLogicalTurn(server, payload = {}) {
         approvalMode: payload.approvalMode || "ask",
         skillInputs: Array.isArray(payload.skillInputs) ? payload.skillInputs : [],
         imageInputs: Array.isArray(payload.imageInputs) ? payload.imageInputs : [],
+        fileInputs: Array.isArray(payload.fileInputs) ? payload.fileInputs : [],
+        webSearch: Boolean(payload.webSearch),
       },
     );
   } catch (error) {
@@ -1843,7 +1886,9 @@ async function steerLogicalTurn(server, payload = {}) {
   try {
     return await server.steerTurn(nativeThreadId, expectedTurnId, payload.text, {
       skillInputs: Array.isArray(payload.skillInputs) ? payload.skillInputs : [],
-      imageInputs: Array.isArray(payload.imageInputs) ? payload.imageInputs : [],
+        imageInputs: Array.isArray(payload.imageInputs) ? payload.imageInputs : [],
+        fileInputs: Array.isArray(payload.fileInputs) ? payload.fileInputs : [],
+        webSearch: Boolean(payload.webSearch),
     });
   } catch (error) {
     const current = pendingSteerDisplays.get(pendingKey) || [];
@@ -1879,6 +1924,7 @@ function publicStoreSnapshot() {
     threadSettings: { ...metadata.threadSettings },
     providerRoutes: structuredClone(metadata.providerRoutes),
     threadAliases: { ...metadata.threadAliases },
+    threadDecorations: structuredClone(metadata.threadDecorations),
     hiddenThreadIds: [...metadata.hiddenThreads],
     deletedThreadIds: [...metadata.deletedThreads],
     localArchivedThreadIds: [...metadata.localArchivedThreads],
@@ -1894,7 +1940,7 @@ function publicStoreSnapshot() {
 }
 
 function skillLibraryRoot() {
-  return path.join(providerStore.conversationHome(), "share-master-skill-library");
+  return path.join(providerStore.conversationHome(), "chatswitch-skill-library");
 }
 
 function activeSkillRoot() {
@@ -1902,7 +1948,7 @@ function activeSkillRoot() {
 }
 
 function installedSkillSourceRoot() {
-  return path.join(providerStore.conversationHome(), "share-master-installed-skill-sources");
+  return path.join(providerStore.conversationHome(), "chatswitch-installed-skill-sources");
 }
 
 async function refreshPrivateSkills() {
@@ -1987,6 +2033,92 @@ async function privateExtensionSnapshot() {
 
 const CLIPBOARD_IMAGE_PATTERN = /\.(?:gif|jpe?g|png|webp)$/i;
 const MAX_CLIPBOARD_IMAGE_BYTES = 25 * 1024 * 1024;
+const OPENABLE_DOCUMENT_PATTERN = /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|zip)$/i;
+const MAX_FILE_PREVIEW_BYTES = 50 * 1024 * 1024;
+const MAX_TEXT_PREVIEW_BYTES = 5 * 1024 * 1024;
+const OFFICE_PREVIEW_MEMBERS = {
+  ".docx": ["word/document.xml"],
+  ".pptx": ["ppt/slides/slide1.xml"],
+  ".xlsx": ["xl/sharedStrings.xml", "xl/worksheets/sheet1.xml"],
+};
+
+function resolveOpenableFile(target) {
+  let value = String(target || "").trim();
+  if (/^file:\/\//i.test(value)) {
+    try { value = fileURLToPath(value); } catch { throw new Error("文件路径无效。"); }
+  }
+  if (/^sandbox:/i.test(value)) value = value.replace(/^sandbox:/i, "");
+  if (!path.isAbsolute(value)) throw new Error("只允许打开本机生成的文件。");
+  const filePath = path.resolve(value);
+  if (!OPENABLE_DOCUMENT_PATTERN.test(filePath)) throw new Error("当前只支持打开 PDF、Word、Excel、PowerPoint、文本和压缩文件。");
+  let stats;
+  try { stats = fs.statSync(filePath); } catch { throw new Error("文件不存在或已被移动。"); }
+  if (!stats.isFile()) throw new Error("目标不是文件。");
+  if (stats.size > MAX_FILE_PREVIEW_BYTES) throw new Error("文件超过 50 MB，无法在应用内预览。");
+  return { filePath, stats };
+}
+
+function officeXmlText(value) {
+  return String(value || "")
+    .replace(/<w:tab\s*\/?>/gi, "\t")
+    .replace(/<w:(?:br|cr)\s*\/?>/gi, "\n")
+    .replace(/<\/w:p>/gi, "\n")
+    .replace(/<\/a:t>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function officePreviewText(filePath, extension) {
+  const members = OFFICE_PREVIEW_MEMBERS[extension];
+  if (!members) return "";
+  for (const member of members) {
+    try {
+      const result = await execFilePromise("tar.exe", ["-xOf", filePath, member], { timeout: 12000, maxBuffer: MAX_TEXT_PREVIEW_BYTES });
+      const text = officeXmlText(result.stdout);
+      if (text) return text.slice(0, MAX_TEXT_PREVIEW_BYTES);
+    } catch {
+      // A legacy or malformed Office archive falls back to the system opener.
+    }
+  }
+  return "";
+}
+
+async function previewFile(target) {
+  const { filePath, stats } = resolveOpenableFile(target);
+  const extension = path.extname(filePath).toLowerCase();
+  const fileName = path.basename(filePath);
+  const base = { filePath, fileName, extension, size: stats.size };
+  if (extension === ".pdf") {
+    return { ...base, kind: "pdf", url: pathToFileURL(filePath).toString() };
+  }
+  if ([".txt", ".md", ".csv", ".json"].includes(extension)) {
+    if (stats.size > MAX_TEXT_PREVIEW_BYTES) throw new Error("文本文件超过 5 MB，无法在应用内预览。");
+    const content = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+    if (content.includes("\u0000")) throw new Error("该文件不是可读文本，请使用系统程序打开。");
+    return { ...base, kind: extension === ".md" ? "markdown" : "text", content };
+  }
+  if ([".docx", ".xlsx", ".pptx"].includes(extension)) {
+    const content = await officePreviewText(filePath, extension);
+    return { ...base, kind: content ? "office-text" : "office", content };
+  }
+  if (extension === ".zip") {
+    try {
+      const result = await execFilePromise("tar.exe", ["-tf", filePath], { timeout: 12000, maxBuffer: 512 * 1024 });
+      const entries = result.stdout.split(/\r?\n/).filter(Boolean).slice(0, 500);
+      return { ...base, kind: "archive", entries, truncated: result.stdout.split(/\r?\n/).filter(Boolean).length > entries.length };
+    } catch {
+      return { ...base, kind: "archive", entries: [] };
+    }
+  }
+  return { ...base, kind: "office" };
+}
 
 async function clipboardImageFromPayload(payload = {}) {
   const localPath = String(payload.path || "").trim();
@@ -2290,14 +2422,38 @@ function ensureScheduledTaskIdle(taskId) {
 async function runConversationMirror() {
   const configuredSource = providerStore?.conversationMirrorSource();
   if (!configuredSource) return null;
+  const targetHome = path.resolve(providerStore.conversationHome());
+  const isIndependent = (value) => {
+    const sourceHome = path.resolve(value);
+    const targetFromSource = path.relative(sourceHome, targetHome);
+    const sourceFromTarget = path.relative(targetHome, sourceHome);
+    return sourceHome.toLocaleLowerCase() !== targetHome.toLocaleLowerCase()
+      && !(targetFromSource && !targetFromSource.startsWith("..") && !path.isAbsolute(targetFromSource))
+      && !(sourceFromTarget && !sourceFromTarget.startsWith("..") && !path.isAbsolute(sourceFromTarget));
+  };
   const nativeCodexHome = path.join(os.homedir(), ".codex");
   const sources = [...new Set([configuredSource, nativeCodexHome, CODEX_HOME]
     .filter(Boolean)
-    .map((value) => path.resolve(value)))];
+    .map((value) => path.resolve(value))
+    .filter(isIndependent))];
+  if (!sources.length) {
+    conversationMirrorLastResult = {
+      copied: 0,
+      updated: 0,
+      skipped: 0,
+      conflicts: 0,
+      bytes: 0,
+      sourceHomes: [],
+      warning: "未找到与 ChatSwitch 副本目录分离的聊天记录源目录。",
+      completedAt: Date.now(),
+    };
+    return conversationMirrorLastResult;
+  }
   if (conversationMirrorSync) return conversationMirrorSync;
-  conversationMirrorSync = syncConversationMirrors(sources, providerStore.conversationHome());
+  conversationMirrorSync = syncConversationMirrors(sources, targetHome);
   try {
     const result = await conversationMirrorSync;
+    conversationMirrorLastResult = { ...result, completedAt: Date.now() };
     if (result.copied || result.updated) {
       for (const window of BrowserWindow.getAllWindows()) {
         if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
@@ -2313,11 +2469,22 @@ async function runConversationMirror() {
   }
 }
 
+function restartConversationMirrorTimer() {
+  if (conversationMirrorTimer) clearInterval(conversationMirrorTimer);
+  conversationMirrorTimer = null;
+  const settings = providerStore?.conversationMirrorSettings?.();
+  if (!settings?.enabled || !settings.source) return;
+  conversationMirrorTimer = setInterval(() => {
+    runConversationMirror().catch((error) => console.error(`[conversation-mirror] ${error.message}`));
+  }, settings.intervalMs);
+  conversationMirrorTimer.unref?.();
+}
+
 if (!hasSingleInstanceLock) app.quit();
 
 app.on("second-instance", (_event, argv) => {
   if (!hasSingleInstanceLock) return;
-  const link = synclatticeLinkFromArgs(argv);
+  const link = chatSwitchLinkFromArgs(argv);
   app.whenReady().then(() => (link ? openDeepLink(link) : showAppWindow()));
 });
 
@@ -2330,8 +2497,8 @@ app.on("open-url", (event, url) => {
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   if (process.platform === "win32"
-    && process.env.SHARE_MASTER_QA !== "1"
-    && !process.env.CODEX_DECK_QA_SCREENSHOT) {
+    && process.env.CHATSWITCH_QA !== "1"
+    && !process.env.CHATSWITCH_QA_SCREENSHOT) {
     try {
       ensureWindowsNotificationIdentity({
         appData: app.getPath("appData"),
@@ -2360,7 +2527,7 @@ app.whenReady().then(async () => {
     codexHomes: [CODEX_HOME, path.join(os.homedir(), ".codex")],
     providerStore,
   });
-  if (app.isPackaged) app.setAsDefaultProtocolClient("synclattice");
+  if (app.isPackaged) app.setAsDefaultProtocolClient("chatswitch");
   await createTray();
   try {
     providerStore.createRotatingBackup();
@@ -2382,13 +2549,13 @@ app.whenReady().then(async () => {
     }
   }, 6 * 60 * 60 * 1000);
   backupTimer.unref?.();
-  const configuredSkillSources = String(process.env.SHARE_MASTER_SKILL_SOURCES || "")
+  const configuredSkillSources = String(process.env.CHATSWITCH_SKILL_SOURCES || "")
     .split(path.delimiter)
     .map((item) => item.trim())
     .filter(Boolean);
   skillSources = configuredSkillSources.length
     ? configuredSkillSources
-    : process.env.SHARE_MASTER_STORE_ROOT && process.env.CODEX_DECK_QA_SCREENSHOT
+    : process.env.CHATSWITCH_STORE_ROOT && process.env.CHATSWITCH_QA_SCREENSHOT
       ? []
       : [
       path.join(os.homedir(), ".agents", "skills"),
@@ -2405,8 +2572,8 @@ app.whenReady().then(async () => {
     }, 750);
     skillRefreshTimer.unref?.();
   }
-  if (process.env.SHARE_MASTER_MIRROR_SOURCE) {
-    providerStore.setConversationMirrorSource(process.env.SHARE_MASTER_MIRROR_SOURCE);
+  if (process.env.CHATSWITCH_MIRROR_SOURCE) {
+    providerStore.setConversationMirrorSource(process.env.CHATSWITCH_MIRROR_SOURCE);
   }
   const scheduledTaskTimer = setInterval(() => {
     runDueScheduledTasks().catch((error) => console.error(`[scheduled-task] ${error.message}`));
@@ -2415,16 +2582,16 @@ app.whenReady().then(async () => {
   runDueThreadDeletions();
   const threadDeletionTimer = setInterval(runDueThreadDeletions, 30000);
   threadDeletionTimer.unref?.();
-  if (process.env.CODEX_DECK_QA_CLAUDE_TOKEN && process.env.SHARE_MASTER_STORE_ROOT) {
-    providerStore.saveProviderKey("claude", process.env.CODEX_DECK_QA_CLAUDE_TOKEN);
+  if (process.env.CHATSWITCH_QA_CLAUDE_TOKEN && process.env.CHATSWITCH_STORE_ROOT) {
+    providerStore.saveProviderKey("claude", process.env.CHATSWITCH_QA_CLAUDE_TOKEN);
     providerStore.saveClaudeSettings({
       vendorLabel: "Hexuan",
       baseUrl: "https://ai.hexuan.cc/v1",
       model: "fable",
     });
   }
-  if (process.env.CODEX_DECK_QA_HEXUAN_TOKEN && process.env.SHARE_MASTER_STORE_ROOT) {
-    providerStore.saveProviderKey("hexuan", process.env.CODEX_DECK_QA_HEXUAN_TOKEN);
+  if (process.env.CHATSWITCH_QA_HEXUAN_TOKEN && process.env.CHATSWITCH_STORE_ROOT) {
+    providerStore.saveProviderKey("hexuan", process.env.CHATSWITCH_QA_HEXUAN_TOKEN);
   }
   ipcMain.handle("app:bootstrap", async () => ({
     codexHome: providerStore.conversationHome(),
@@ -2459,11 +2626,64 @@ app.whenReady().then(async () => {
       truncated: Boolean(conversation.truncated),
     };
   });
+  ipcMain.handle("local-history:import-all", async (_event, input = {}) => {
+    const requestedSourceIds = Array.isArray(input.sourceIds)
+      ? input.sourceIds.map((value) => String(value || "").trim()).filter(Boolean)
+      : [String(input.sourceId || "").trim()].filter(Boolean);
+    const sourceIds = requestedSourceIds.length
+      ? requestedSourceIds
+      : (await localHistoryReader.sources()).filter((source) => source.available).map((source) => source.id);
+    if (!sourceIds.length) throw new Error("没有发现可导入的本地记录来源。");
+    const result = { total: 0, imported: 0, duplicate: 0, failed: 0, sources: sourceIds, errors: [] };
+    for (const sourceId of sourceIds) {
+      const index = await localHistoryReader.list({
+        sourceId,
+        search: String(input.search || "").trim(),
+        limit: 20000,
+        all: true,
+      });
+      result.total += index.total;
+      for (const summary of index.conversations) {
+        try {
+          const conversation = await localHistoryReader.read({ conversationId: summary.id });
+          const imported = sharedHistoryReaders().compatible.importLocalConversation(conversation);
+          if (imported.duplicate) result.duplicate += 1;
+          else result.imported += 1;
+        } catch (error) {
+          result.failed += 1;
+          if (result.errors.length < 8) result.errors.push(`${summary.title || summary.id}: ${error.message}`);
+        }
+      }
+    }
+    return result;
+  });
+  ipcMain.handle("codex:list-local", async (_event, query = {}) => (
+    sharedHistoryReaders().compatible.listLocalThreads(query?.search || "")
+  ));
+  ipcMain.handle("codex:read-local", async (_event, threadId) => (
+    rendererThreadWindow(await sharedHistoryReaders().compatible.readThread(threadId))
+  ));
+  ipcMain.handle("conversation-mirror:status", () => ({
+    ...(providerStore.conversationMirrorSettings?.() || { source: null, target: providerStore.conversationHome(), intervalMs: 60000, enabled: false }),
+    lastResult: conversationMirrorLastResult,
+  }));
+  ipcMain.handle("conversation-mirror:configure", (_event, input = {}) => {
+    const settings = providerStore.setConversationMirrorSettings(input);
+    if (settings.source) localHistoryReader.addCodexSource(settings.source);
+    restartConversationMirrorTimer();
+    return settings;
+  });
+  ipcMain.handle("conversation-mirror:run", async () => {
+    if (!providerStore.conversationMirrorSettings?.().source) throw new Error("请先选择 Codex 原始记录目录。");
+    const result = await runConversationMirror();
+    restartConversationMirrorTimer();
+    return result || conversationMirrorLastResult || { copied: 0, updated: 0, skipped: 0, conflicts: 0 };
+  });
   ipcMain.handle("deep-link:confirm-import", async (_event, input = {}) => {
     const importType = String(input.importType || "").trim();
     const rawConfig = input.config && typeof input.config === "object" ? input.config : {};
     const encoded = Buffer.from(JSON.stringify({ type: importType, ...rawConfig }), "utf8").toString("base64url");
-    const normalized = parseSynclatticeLink(`synclattice://import?data=${encoded}`);
+    const normalized = parseChatSwitchLink(`chatswitch://import?data=${encoded}`);
     if (!normalized || normalized.action !== "import") throw new Error("导入配置无效或包含敏感字段。");
     if (normalized.importType === "provider") return { importType, config: normalized.config, requiresApiKey: true };
     if (normalized.importType === "prompt") {
@@ -2495,7 +2715,7 @@ app.whenReady().then(async () => {
     const root = path.resolve(installedSkillSourceRoot());
     const target = path.resolve(root, name);
     if (path.dirname(target) !== root || !fs.existsSync(path.join(target, "SKILL.md"))) {
-      throw new Error("只能卸载通过 Synclattice 安装的 Skill。");
+      throw new Error("只能卸载通过 ChatSwitch 安装的 Skill。");
     }
     fs.rmSync(target, { recursive: true, force: true });
     const result = await refreshPrivateSkills();
@@ -2575,7 +2795,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("dialog:sync-directory", async (event, currentPath) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(owner, {
-      title: "选择 Synclattice 同步目录",
+      title: "选择 ChatSwitch 同步目录",
       defaultPath: currentPath || undefined,
       properties: ["openDirectory", "createDirectory"],
     });
@@ -2587,6 +2807,15 @@ app.whenReady().then(async () => {
       title: "选择图片附件",
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+  ipcMain.handle("dialog:files", async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(owner, {
+      title: "选择要发送给模型的文件",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "文档、表格与文本", extensions: ["pdf", "docx", "xlsx", "pptx", "txt", "md", "csv", "json"] }, { name: "所有文件", extensions: ["*"] }],
     });
     return result.canceled ? [] : result.filePaths;
   });
@@ -2612,7 +2841,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("app:notify", (event, payload = {}) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
-    const title = String(payload.title || "Synclattice").slice(0, 120);
+    const title = String(payload.title || "ChatSwitch").slice(0, 120);
     const body = String(payload.body || "").slice(0, 300);
     if (Notification.isSupported()) {
       const notification = new Notification({ title, body, silent: false });
@@ -2654,20 +2883,29 @@ app.whenReady().then(async () => {
     broadcastStoreSnapshot();
     return provider;
   });
+  ipcMain.handle("provider:update-builtin-api", (_event, input) => {
+    const provider = providerStore.updateBuiltinApi(input);
+    broadcastStoreSnapshot();
+    return provider;
+  });
   ipcMain.handle("provider:save-route", (_event, input) => {
     const route = providerStore.saveProviderRoute(input);
     broadcastStoreSnapshot();
     return route;
   });
-  ipcMain.handle("provider:probe-models", async (_event, input = {}) => {
+  handleRendererIpc("provider:probe-models", async (_event, input = {}) => {
     const providerId = String(input.providerId || "").trim();
     let provider = null;
     if (providerId) {
       provider = providerStore.resolve(providerId);
-      if (provider.type !== "relay") throw new Error("只能测试 Synclattice 中添加的模型供应商。");
+      if (provider.type !== "relay" && !["niubi", "hexuan"].includes(provider.id)) {
+        throw new Error("只能测试 ChatSwitch 中添加的模型供应商。");
+      }
     }
     const baseUrl = String(input.baseUrl || provider?.baseUrl || "").trim();
-    const apiKey = String(input.apiKey || "").trim() || provider?.apiKey || null;
+    const environment = provider ? await providerEnvironment() : {};
+    const apiKey = String(input.apiKey || "").trim()
+      || (provider ? providerApiKey(provider, environment) : null);
     const startedAt = Date.now();
     const models = await fetchOpenAIModels(baseUrl, apiKey, net.fetch);
     return { models, latencyMs: Math.max(0, Date.now() - startedAt) };
@@ -2726,7 +2964,7 @@ app.whenReady().then(async () => {
     const provider = providerStore.resolve(providerId);
     if (!["api", "relay"].includes(provider.type)) throw new Error("该连接没有中转余额。");
     const environment = await providerEnvironment();
-    const apiKey = apiKeyForProvider(provider, environment);
+    const apiKey = providerApiKey(provider, environment);
     if (!apiKey) throw new Error(`${provider.envKey || "API Key"} 未配置，无法查询余额。`);
     return fetchRelayBalance(provider, apiKey, net.fetch);
   });
@@ -2742,8 +2980,8 @@ app.whenReady().then(async () => {
   ipcMain.handle("config:export", async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showSaveDialog(owner, {
-      title: "导出 Synclattice 配置",
-      defaultPath: `synclattice-config-${new Date().toISOString().slice(0, 10)}.json`,
+      title: "导出 ChatSwitch 配置",
+      defaultPath: `chatswitch-config-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true };
@@ -2752,10 +2990,47 @@ app.whenReady().then(async () => {
     fs.renameSync(temporary, result.filePath);
     return { canceled: false, filePath: result.filePath, containsCredentials: false };
   });
+  ipcMain.handle("thread:export", async (event, input = {}) => {
+    const threadId = String(input.threadId || "").trim();
+    if (!threadId) throw new Error("无效的会话 ID。");
+    const format = ["md", "html", "json", "pdf"].includes(input.format) ? input.format : "md";
+    const server = servers.get(event.sender.id);
+    let response;
+    if (server?.ready) {
+      try { response = await sharedReadThread(server, threadId); } catch { response = await sharedHistoryReaders().compatible.readThread(threadId); }
+    } else response = await sharedHistoryReaders().compatible.readThread(threadId);
+    const thread = response.thread || response;
+    const title = String(thread.name || thread.preview || "ChatSwitch 会话").trim().slice(0, 80) || "ChatSwitch 会话";
+    const safeTitle = title.replace(/[<>:"/\\\\|?*]+/g, "_");
+    const rows = (thread.turns || []).flatMap((turn) => (turn.items || []).map((item) => {
+      const role = item.type === "userMessage" ? "用户" : item.type === "reasoning" ? "推理摘要" : "助手";
+      const text = item.type === "userMessage"
+        ? (item.content || []).map((part) => part.text || "").join("\\n")
+        : item.text || (item.summary || []).map((part) => part.text || "").join("\\n");
+      return { role, text: String(text || "").trim() };
+    }).filter((item) => item.text));
+    const markdown = "# " + title + "\\n\\n" + rows.map((row) => "## " + row.role + "\\n\\n" + row.text).join("\\n\\n---\\n\\n") + "\\n";
+    const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
+    const html = "<!doctype html><meta charset=\"utf-8\"><title>" + escape(title) + "</title><style>body{font:16px system-ui;max-width:860px;margin:40px auto;line-height:1.65;color:#1b2529}h1{border-bottom:1px solid #d6dfe0;padding-bottom:12px}h2{margin-top:28px;color:#087f68;white-space:pre-wrap}p{white-space:pre-wrap}</style><h1>" + escape(title) + "</h1>" + rows.map((row) => "<h2>" + escape(row.role) + "</h2><p>" + escape(row.text) + "</p>").join("");
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showSaveDialog(owner, { title: "导出会话", defaultPath: safeTitle + "." + format, filters: [{ name: format.toUpperCase(), extensions: [format] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    if (format === "json") fs.writeFileSync(result.filePath, JSON.stringify(thread, null, 2) + "\\n", "utf8");
+    else if (format === "html") fs.writeFileSync(result.filePath, html, "utf8");
+    else if (format === "md") fs.writeFileSync(result.filePath, markdown, "utf8");
+    else {
+      const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+      try {
+        await printWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+        fs.writeFileSync(result.filePath, await printWindow.webContents.printToPDF({ printBackground: true, pageSize: "A4" }));
+      } finally { if (!printWindow.isDestroyed()) printWindow.destroy(); }
+    }
+    return { canceled: false, filePath: result.filePath, format };
+  });
   ipcMain.handle("config:import", async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
     const result = await dialog.showOpenDialog(owner, {
-      title: "导入 Synclattice 配置",
+      title: "导入 ChatSwitch 配置",
       properties: ["openFile"],
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
@@ -2784,7 +3059,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("backup:restore", (_event, name) => {
     const restored = providerStore.restoreConfigurationBackup(name);
     for (const [webContentsId, server] of servers) {
-        failScheduledTasksForServer(server, "Synclattice 配置已从备份恢复。");
+        failScheduledTasksForServer(server, "ChatSwitch 配置已从备份恢复。");
       server.stop();
       servers.delete(webContentsId);
       nextConnectionGeneration(webContentsId);
@@ -2857,6 +3132,9 @@ app.whenReady().then(async () => {
     broadcastStoreSnapshot();
     return aliases;
   });
+  ipcMain.handle("thread:set-decoration", (_event, input = {}) => (
+    providerStore.setThreadDecoration(input.threadId, input)
+  ));
   ipcMain.handle("thread:archive-local", (_event, threadId) => {
     const archivedIds = providerStore.archiveThreadLocal(threadId);
     broadcastStoreSnapshot();
@@ -2936,6 +3214,10 @@ app.whenReady().then(async () => {
     broadcastStoreSnapshot();
     return snapshot;
   });
+  ipcMain.handle("auth:claude-login", async (_event) => {
+    const provider = providerStore.resolve("claude");
+    return loginClaudeOfficial(provider);
+  });
 
   ipcMain.handle("url:open", async (_event, target) => {
     let url;
@@ -2947,6 +3229,39 @@ app.whenReady().then(async () => {
     if (!["http:", "https:"].includes(url.protocol)) throw new Error("仅允许打开 HTTP 或 HTTPS 链接。");
     await shell.openExternal(url.toString());
     return true;
+  });
+  ipcMain.handle("file:open", async (_event, target) => {
+    const { filePath } = resolveOpenableFile(target);
+    const failure = await shell.openPath(filePath);
+    if (failure) throw new Error(failure);
+    return { opened: true, filePath };
+  });
+  ipcMain.handle("file:preview", async (_event, target) => previewFile(target));
+  ipcMain.handle("file:extract-text", async (_event, targets) => {
+    const files = Array.isArray(targets) ? targets : [targets];
+    const results = [];
+    for (const target of files.slice(0, 8)) {
+      const resolved = resolveOpenableFile(target);
+      const extension = path.extname(resolved.filePath).toLowerCase();
+      if ([".txt", ".md", ".csv", ".json", ".docx", ".xlsx", ".pptx"].includes(extension)) {
+        const preview = await previewFile(resolved.filePath);
+        if (!preview.content) throw new Error(`${path.basename(resolved.filePath)} 没有可提取的文本。`);
+        results.push({ fileName: path.basename(resolved.filePath), content: preview.content.slice(0, 120000) });
+        continue;
+      }
+      if (extension === ".pdf") {
+        try {
+          const extracted = await execFilePromise("pdftotext.exe", ["-layout", resolved.filePath, "-"], { timeout: 20000, maxBuffer: 8 * 1024 * 1024 });
+          if (!extracted.stdout.trim()) throw new Error("PDF 没有可提取文本");
+          results.push({ fileName: path.basename(resolved.filePath), content: extracted.stdout.slice(0, 120000) });
+        } catch (error) {
+          throw new Error(`${path.basename(resolved.filePath)} 暂时无法提取文本：请确认 PDF 包含文字层。`);
+        }
+        continue;
+      }
+      throw new Error(`${path.basename(resolved.filePath)} 暂不支持作为模型上下文上传。`);
+    }
+    return results;
   });
 
   handleRendererIpc("codex:connect", async (event, providerId) => {
@@ -2973,7 +3288,7 @@ app.whenReady().then(async () => {
       }
       let modelWarning = null;
       if (["api", "relay"].includes(provider.type)) {
-        const apiKey = apiKeyForProvider(provider, environment);
+        const apiKey = providerApiKey(provider, environment);
         try {
           const models = await fetchOpenAIModels(provider.baseUrl, apiKey, net.fetch);
           if (provider.type === "relay") {
@@ -3057,7 +3372,7 @@ app.whenReady().then(async () => {
           registerApprovalRequest(server, message, mappedServerMessage(server, message), sender, send);
           return;
         }
-        server.respondError(message.id, -32601, `Synclattice does not support ${message.method}.`);
+        server.respondError(message.id, -32601, `ChatSwitch does not support ${message.method}.`);
         send("codex:diagnostic", `已安全取消不支持的 Codex 请求：${message.method}`);
       });
       server.on("diagnostic", (message) => {
@@ -3299,22 +3614,19 @@ app.whenReady().then(async () => {
     return { resolved, alreadyResolved: !resolved };
   });
 
-  const initialDeepLink = synclatticeLinkFromArgs(process.argv);
+  const initialDeepLink = chatSwitchLinkFromArgs(process.argv);
   const initialWindow = initialDeepLink ? null : createWindow(
-    process.env.SHARE_MASTER_OPEN_PROVIDER || process.env.CODEX_DECK_QA_PROVIDER || null,
-    process.env.SHARE_MASTER_OPEN_PROJECT || process.env.CODEX_DECK_QA_PROJECT || null,
-    process.env.SHARE_MASTER_OPEN_THREAD || process.env.CODEX_DECK_QA_THREAD || null,
-    process.env.SHARE_MASTER_OPEN_PROJECT_ID || null,
+    process.env.CHATSWITCH_OPEN_PROVIDER || process.env.CHATSWITCH_QA_PROVIDER || null,
+    process.env.CHATSWITCH_OPEN_PROJECT || process.env.CHATSWITCH_QA_PROJECT || null,
+    process.env.CHATSWITCH_OPEN_THREAD || process.env.CHATSWITCH_QA_THREAD || null,
+    process.env.CHATSWITCH_OPEN_PROJECT_ID || null,
   );
   for (const link of [initialDeepLink, ...pendingDeepLinks.splice(0)].filter(Boolean)) openDeepLink(link);
-  if (providerStore.conversationMirrorSource()) {
+  if (providerStore.conversationMirrorSettings?.().enabled) {
     runConversationMirror().catch((error) => console.error(`[conversation-mirror] ${error.message}`));
-    const mirrorTimer = setInterval(() => {
-      runConversationMirror().catch((error) => console.error(`[conversation-mirror] ${error.message}`));
-    }, 60000);
-    mirrorTimer.unref?.();
+    restartConversationMirrorTimer();
   }
-  if (process.env.CODEX_DECK_QA_MULTI_PROVIDER === "1") runMultiProviderWindowQa(initialWindow);
+  if (process.env.CHATSWITCH_QA_MULTI_PROVIDER === "1") runMultiProviderWindowQa(initialWindow);
   app.on("activate", () => {
     showAppWindow();
   });
@@ -3323,10 +3635,10 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   for (const server of servers.values()) {
     clearApprovalRequests(server);
-    failScheduledTasksForServer(server, "Synclattice 已关闭。");
+    failScheduledTasksForServer(server, "ChatSwitch 已关闭。");
     server.stop();
   }
-  if ((quitting || process.env.CODEX_DECK_QA_SCREENSHOT || !tray || providerStore?.appSettings().closeToTray === false)
+  if ((quitting || process.env.CHATSWITCH_QA_SCREENSHOT || !tray || providerStore?.appSettings().closeToTray === false)
     && process.platform !== "darwin") app.quit();
 });
 

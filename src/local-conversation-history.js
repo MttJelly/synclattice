@@ -318,7 +318,7 @@ function createLocalHistoryReader({ homeDirectory = os.homedir(), codexHomes = [
     return result;
   }
 
-  async function list({ sourceId = "codex", search = "", limit = 500 } = {}) {
+  async function list({ sourceId = "codex", search = "", limit = 500, all = false } = {}) {
     const source = definitions.get(String(sourceId));
     if (!source) throw new Error("不支持的本地会话来源。");
     const files = await sourceFiles(source);
@@ -343,7 +343,7 @@ function createLocalHistoryReader({ homeDirectory = os.homedir(), codexHomes = [
         .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(query))
     )) : visibleResults;
     filtered.sort((a, b) => b.updatedAt - a.updatedAt);
-    const safeLimit = Math.max(1, Math.min(2000, Number(limit) || 500));
+    const safeLimit = Math.max(1, Math.min(all ? MAX_FILES_PER_SOURCE : 2000, Number(limit) || (all ? MAX_FILES_PER_SOURCE : 500)));
     return {
       sourceId: source.id,
       total: filtered.length,

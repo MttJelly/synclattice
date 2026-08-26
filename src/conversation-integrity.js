@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const THREAD_ID_PATTERN = /^[a-zA-Z0-9_-]{8,160}$/;
-const INTERRUPTED_TOOL_OUTPUT = "Tool execution was interrupted before Synclattice recorded a result. Treat this call as cancelled and do not infer that it succeeded.";
+const INTERRUPTED_TOOL_OUTPUT = "Tool execution was interrupted before ChatSwitch recorded a result. Treat this call as cancelled and do not infer that it succeeded.";
 
 function sessionFiles(directory) {
   if (!fs.existsSync(directory)) return [];

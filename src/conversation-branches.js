@@ -35,7 +35,7 @@ function buildContinuationPrompt(thread, userText, maxCharacters = 60000) {
   const prompt = String(userText || "").trim();
   if (!latest.length) return prompt;
   return [
-    "你正在 Synclattice 中接续一个由其他模型参与的同一逻辑会话。",
+    "你正在 ChatSwitch 中接续一个由其他模型参与的同一逻辑会话。",
     "下面是此前会话记录。请把它作为上下文继续处理，不要复述记录，也不要声称无法访问此前内容。",
     "<shared_conversation>",
     ...latest,

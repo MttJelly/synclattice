@@ -1,4 +1,4 @@
-name: Synclattice Quality
+name: ChatSwitch Quality
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     env:
-      SYNCLATTICE_BASE_REVISION: ${{ github.event.before }}
+      CHATSWITCH_BASE_REVISION: ${{ github.event.before }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,7 +38,7 @@ jobs:
               -or $normalized.StartsWith('scripts/') `
               -or $normalized -eq 'package.json' `
               -or $normalized -eq 'package-lock.json' `
-              -or $normalized -eq 'Start Synclattice.cmd'
+              -or $normalized -eq 'Start ChatSwitch.cmd'
             $isQuality = $isProduct -or $normalized.StartsWith('qa/')
             if ($isProduct) { $productChanged = $true }
             if ($isQuality) { $qualityChanged = $true }

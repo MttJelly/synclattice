@@ -1,19 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="mark" x1="270" y1="230" x2="760" y2="790" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#62ddb0"/>
-      <stop offset="0.48" stop-color="#e9f7f2"/>
-      <stop offset="1" stop-color="#6eb6ed"/>
+    <linearGradient id="s" x1="285" y1="210" x2="744" y2="824" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e6fff8"/>
+      <stop offset="0.28" stop-color="#9cebd6"/>
+      <stop offset="0.68" stop-color="#38c9a4"/>
+      <stop offset="1" stop-color="#8ff1d8"/>
     </linearGradient>
   </defs>
-  <rect x="32" y="32" width="960" height="960" rx="224" fill="#17211e"/>
-  <rect x="48" y="48" width="928" height="928" rx="208" fill="none" stroke="#31423c" stroke-width="8"/>
-  <path d="M718 286 C625 205 407 212 306 306 C213 393 275 481 503 508 C735 535 808 629 711 726 C612 825 391 817 292 732"
-        fill="none" stroke="#0c1411" stroke-width="174" stroke-linecap="round" stroke-linejoin="round" opacity="0.72"/>
-  <path d="M718 286 C625 205 407 212 306 306 C213 393 275 481 503 508 C735 535 808 629 711 726 C612 825 391 817 292 732"
-        fill="none" stroke="url(#mark)" stroke-width="126" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="718" cy="286" r="25" fill="#17211e"/>
-  <circle cx="718" cy="286" r="12" fill="#f0c96b"/>
-  <circle cx="292" cy="732" r="25" fill="#17211e"/>
-  <circle cx="292" cy="732" r="12" fill="#f0c96b"/>
+  <rect width="1024" height="1024" rx="224" fill="#111a19"/>
+  <rect x="18" y="18" width="988" height="988" rx="210" fill="none" stroke="#273734" stroke-width="20"/>
+  <path d="M760 268C682 208 573 180 456 180c-142 0-254 58-254 157 0 99 105 132 241 161l99 21c111 24 187 51 187 123 0 81-94 132-244 132-128 0-222-37-302-110" fill="none" stroke="#07100f" stroke-width="158" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+  <path d="M760 268C682 208 573 180 456 180c-142 0-254 58-254 157 0 99 105 132 241 161l99 21c111 24 187 51 187 123 0 81-94 132-244 132-128 0-222-37-302-110" fill="none" stroke="url(#s)" stroke-width="120" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

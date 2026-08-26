@@ -4,15 +4,15 @@ import { render } from "./vue-render.generated.js";
 const root = document.querySelector("#app");
 root.replaceChildren();
 
-const savedTheme = ["system", "light", "dark"].includes(localStorage.getItem("synclattice-theme"))
-  ? localStorage.getItem("synclattice-theme")
+const savedTheme = ["system", "light", "dark"].includes(localStorage.getItem("chatswitch-theme"))
+  ? localStorage.getItem("chatswitch-theme")
   : "system";
 const resolvedTheme = savedTheme === "system"
   ? matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
   : savedTheme;
 document.documentElement.dataset.theme = resolvedTheme;
 document.documentElement.style.colorScheme = resolvedTheme;
-window.codexDeck.setWindowTheme(resolvedTheme);
+window.chatSwitch.setWindowTheme(resolvedTheme);
 
 const attachmentUi = reactive({
   items: [],
@@ -28,37 +28,42 @@ const confirmationUi = reactive({
   cancelLabel: "取消",
   tone: "danger",
 });
-window.SynclatticeVueRuntime = { shallowReactive, attachmentUi, confirmationUi };
+window.ChatSwitchVueRuntime = { shallowReactive, attachmentUi, confirmationUi };
 
 const AttachmentTray = {
   name: "AttachmentTray",
   setup() {
-    const remove = (index) => window.dispatchEvent(new CustomEvent("synclattice:remove-attachment", {
+    const remove = (index) => window.dispatchEvent(new CustomEvent("chatswitch:remove-attachment", {
       detail: { index },
     }));
-    const copy = (item) => window.dispatchEvent(new CustomEvent("synclattice:copy-attachment", {
+    const copy = (item) => window.dispatchEvent(new CustomEvent("chatswitch:copy-attachment", {
+      detail: { path: item.path },
+    }));
+    const open = (item) => window.dispatchEvent(new CustomEvent("chatswitch:preview-attachment", {
       detail: { path: item.path },
     }));
     return () => h("div", {
       id: "attachment-list",
       class: ["attachment-list", { hidden: attachmentUi.items.length === 0 }],
-      "aria-label": "待发送图片附件",
+      "aria-label": "待发送附件",
     }, attachmentUi.items.map((item, index) => h("div", {
       class: "attachment-item",
       key: item.path,
     }, [
-      h("img", { src: item.url, alt: `待发送图片 ${index + 1}` }),
+      item.isImage
+        ? h("img", { src: item.url, alt: `待发送图片 ${index + 1}` })
+        : h("span", { class: "attachment-file-icon", "aria-hidden": "true" }, item.extension || "FILE"),
       h("span", { class: "attachment-copy" }, [
         h("strong", { title: item.name }, item.name),
-        h("small", null, "图片附件"),
+        h("small", null, item.typeLabel),
       ]),
       h("button", {
         type: "button",
         class: "attachment-copy-button",
-        title: `复制 ${item.name}`,
-        "aria-label": `复制 ${item.name}`,
-        onClick: () => copy(item),
-      }, [h("span", { "aria-hidden": "true" }, "⧉")]),
+        title: item.isImage ? `复制 ${item.name}` : `预览 ${item.name}`,
+        "aria-label": item.isImage ? `复制 ${item.name}` : `预览 ${item.name}`,
+        onClick: () => (item.isImage ? copy(item) : open(item)),
+      }, [h("span", { "aria-hidden": "true" }, item.isImage ? "⧉" : "⌕")]),
       h("button", {
         type: "button",
         class: "attachment-remove",
@@ -81,8 +86,8 @@ const AttachmentDropOverlay = {
     }, [
       h("div", { class: "attachment-drop-content" }, [
         h("span", { class: "attachment-drop-symbol", "aria-hidden": "true" }, "+"),
-        h("strong", null, "释放以添加图片"),
-        h("small", null, "PNG、JPG、WebP 或 GIF，最多 8 张"),
+        h("strong", null, "释放以添加附件"),
+        h("small", null, "图片、PDF、Word、Excel、PPT 或文本，最多 8 个"),
       ]),
     ]);
   },
@@ -91,7 +96,7 @@ const AttachmentDropOverlay = {
 const AppConfirmationDialog = {
   name: "AppConfirmationDialog",
   setup() {
-    const decide = (confirmed) => window.dispatchEvent(new CustomEvent("synclattice:confirmation-decision", {
+    const decide = (confirmed) => window.dispatchEvent(new CustomEvent("chatswitch:confirmation-decision", {
       detail: { confirmed },
     }));
     const onKeydown = (event) => {
@@ -157,7 +162,7 @@ const AppConfirmationDialog = {
 };
 
 const vueApp = createApp({
-  name: "SynclatticeApp",
+  name: "ChatSwitchApp",
   components: { AttachmentTray, AttachmentDropOverlay, AppConfirmationDialog },
   render,
   async mounted() {
@@ -166,14 +171,14 @@ const vueApp = createApp({
         const controller = document.createElement("script");
         controller.src = "app.js";
         controller.addEventListener("load", resolve, { once: true });
-        controller.addEventListener("error", () => reject(new Error("无法加载 Synclattice 业务控制器。")), { once: true });
+        controller.addEventListener("error", () => reject(new Error("无法加载 ChatSwitch 业务控制器。")), { once: true });
         document.body.appendChild(controller);
       });
       root.classList.remove("vue-pending");
       root.classList.add("vue-ready");
     } catch (error) {
       root.classList.remove("vue-pending");
-        root.innerHTML = `<main class="renderer-fatal" role="alert"><strong>Synclattice 界面初始化失败</strong><span></span></main>`;
+        root.innerHTML = `<main class="renderer-fatal" role="alert"><strong>ChatSwitch 界面初始化失败</strong><span></span></main>`;
       root.querySelector("span").textContent = error?.message || String(error);
       console.error(error);
     }
@@ -184,4 +189,4 @@ vueApp.config.errorHandler = (error) => {
   console.error("[vue]", error);
 };
 vueApp.mount(root);
-window.shareMasterVue = vueApp;
+window.chatSwitchVue = vueApp;

@@ -242,6 +242,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .attachment-list.hidden { display: none; }
 .attachment-item { position: relative; width: 172px; height: 58px; flex: 0 0 172px; display: grid; grid-template-columns: 50px minmax(0,1fr); align-items: center; gap: 9px; padding: 3px 48px 3px 3px; border: 1px solid var(--line); border-radius: 7px; background: #f8f9fb; overflow: hidden; }
 .attachment-item img { width: 50px; height: 50px; border-radius: 5px; object-fit: cover; }
+.attachment-file-icon { width: 50px; height: 50px; display: grid; place-items: center; border-radius: 5px; background: #e8eef8; color: #31547d; font-size: 11px; font-weight: 750; letter-spacing: .04em; }
 .attachment-copy { min-width: 0; }
 .attachment-copy strong, .attachment-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-copy strong { font-size: 11px; font-weight: 650; }
@@ -947,6 +948,16 @@ body.non-composer-view .chat-view { padding-bottom: 32px; }
   color: #176b59;
 }
 .secondary-command:hover { border-color: #78aa9c; background: #e2f0eb; }
+.official-auth-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-muted); }
+.official-auth-card > div { display: grid; gap: 3px; min-width: 0; }
+.official-auth-card strong { color: var(--ink); font-size: 13px; }
+.official-auth-card span { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.official-auth-card .provider-error { grid-column: 1 / -1; min-height: 16px; }
+html[data-theme="dark"] .official-auth-card { background: #202a27; }
+@media (max-width: 720px) {
+  .official-auth-card { grid-template-columns: 1fr; }
+  .official-auth-card .secondary-command { justify-self: start; }
+}
 
 .usage-dialog { width: min(860px, calc(100% - 28px)); }
 .usage-dialog > .dialog-heading { padding-top: 12px; padding-bottom: 12px; }
@@ -1627,6 +1638,9 @@ html[data-theme="dark"] .import-safety-note { border-color: #315e50; background:
   border-bottom: 1px solid var(--line);
   background: #f7f9f8;
 }
+.local-history-toolbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.local-history-toolbar-actions button { white-space: nowrap; }
+.local-history-toolbar-actions .primary-command { height: 34px; padding-inline: 10px; }
 .local-history-search {
   height: 34px;
   display: grid;
@@ -1910,6 +1924,41 @@ html[data-theme="dark"] .local-provider-badge.missing { background: #493521; col
   overflow-wrap: anywhere;
 }
 .activity-row > span:not(:first-child) { grid-column: 3; white-space: nowrap; }
+.activity-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.activity-status { white-space: nowrap; }
+.activity-command-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--accent);
+  cursor: pointer;
+  font: 11px/1.2 inherit;
+}
+.activity-command-toggle:hover { border-color: var(--accent); background: var(--surface); }
+.activity-command-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.activity-command-toggle svg { width: 13px; height: 13px; }
+.activity-command {
+  grid-column: 2 / -1;
+  width: 100%;
+  min-width: 0;
+  max-height: min(30vh, 240px);
+  box-sizing: border-box;
+  margin: 2px 0 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 12px/1.5 Consolas, "Cascadia Mono", monospace;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
 .activity-output {
   grid-column: 2 / -1;
   width: 100%;
@@ -2012,6 +2061,9 @@ html[data-theme="dark"] .local-provider-badge.missing { background: #493521; col
 html[data-theme="dark"] .activity-row.activity-reasoning,
 html[data-theme="dark"] .activity-row.activity-plan { border-color: #385149; background: #202c28; }
 html[data-theme="dark"] .activity-output { border-color: #38433e; background: #202724; color: #d8e2dd; }
+html[data-theme="dark"] .activity-command-toggle { border-color: #466358; background: #202c28; color: #9bd7c2; }
+html[data-theme="dark"] .activity-command-toggle:hover { border-color: #6ca991; background: #294039; }
+html[data-theme="dark"] .activity-command { border-color: #38433e; background: #202724; color: #d8e2dd; }
 html[data-theme="dark"] .activity-row.activity-reasoning .activity-output,
 html[data-theme="dark"] .activity-row.activity-plan .activity-output { background: transparent; color: #b8c7c0; }
 html[data-theme="dark"] .message-queue-resume { border-color: #46685c; background: #243a33; color: #8bd7bf; }
@@ -2160,7 +2212,7 @@ html[data-theme="dark"] #provider-overlay .provider-option-row.is-selected { bac
 html[data-theme="dark"] #provider-overlay .dialog-action-group { border-color: #303b36; }
 html[data-theme="dark"] #provider-overlay .dialog-action-group-title { color: #94a39c; }
 
-/* Synclattice workspace system refresh. This final layer deliberately consolidates earlier
+/* ChatSwitch workspace system refresh. This final layer deliberately consolidates earlier
    incremental themes without changing any runtime-owned structure or state selector. */
 :root {
   color-scheme: light;
@@ -2648,6 +2700,9 @@ html[data-theme="dark"] .send-button { color: var(--accent-ink); }
   .local-history-preview-actions { width: 100%; min-width: 0; flex-direction: row; align-items: center; justify-content: space-between; }
   .local-history-import-status { max-width: none; text-align: left; }
   .local-history-import-button { min-width: 0; flex: 0 0 auto; }
+  .local-history-toolbar-actions { min-width: 0; }
+  .local-history-toolbar-actions .primary-command { max-width: 42px; overflow: hidden; padding-inline: 9px; }
+  .local-history-toolbar-actions .primary-command span:last-child { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2733,4 +2788,130 @@ body {
 .sync-summary,
 .local-history-message-body { border-radius: var(--radius-md); }
 
+.message-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--accent-strong);
+  font: inherit;
+  cursor: pointer;
+}
+.message-file-link:hover { background: var(--surface-hover); }
+.message-file-link:disabled { opacity: .6; cursor: progress; }
+
 html[data-theme="dark"] .message.user .message-body { background: #1d352e; }
+
+.conversation-mirror-settings {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+.dialog-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.dialog-section-heading span { color: var(--text-muted); font-size: 12px; }
+.form-grid-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+.conversation-mirror-settings .form-actions { align-items: center; }
+
+.file-preview-dialog {
+  width: min(1060px, calc(100% - 28px));
+  height: min(780px, calc(100vh - 86px));
+  max-height: none;
+  overflow: hidden;
+}
+.file-preview-heading { min-width: 0; }
+.file-preview-heading-copy { min-width: 0; overflow: hidden; }
+.file-preview-heading-copy h2,
+.file-preview-heading-copy p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-logo { background: #315e51; }
+.file-preview-status {
+  min-height: 30px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.file-preview-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.file-preview-pdf {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 0;
+  background: #f2f4f3;
+}
+.file-preview-document,
+.file-preview-text {
+  height: 100%;
+  margin: 0;
+  padding: 24px max(24px, calc((100% - 820px) / 2));
+  overflow: auto;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.file-preview-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+  tab-size: 2;
+}
+.file-preview-unsupported {
+  min-height: 240px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  padding: 30px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.file-preview-unsupported svg { width: 28px; height: 28px; color: var(--accent); }
+.file-preview-unsupported strong { color: var(--ink); font-size: 14px; }
+.file-preview-unsupported p { max-width: 430px; margin: 0; line-height: 1.6; }
+.file-preview-actions { justify-content: flex-end; }
+.file-preview-actions .provider-error { min-width: 0; flex: 1; text-align: left; }
+html[data-theme="dark"] .file-preview-status { background: #1b211e; }
+html[data-theme="dark"] .file-preview-pdf { background: #111513; }
+html[data-theme="dark"] .file-preview-document,
+html[data-theme="dark"] .file-preview-text { background: #151a18; }
+@media (max-width: 700px) {
+  .file-preview-dialog { width: calc(100% - 16px); height: calc(100vh - 66px); }
+  .file-preview-document,
+  .file-preview-text { padding: 18px 16px; }
+  .file-preview-actions { justify-content: stretch; }
+  .file-preview-actions .provider-error { flex-basis: 100%; }
+  .file-preview-actions button { flex: 1; justify-content: center; }
+}
+@media (max-width: 680px) {
+  .form-grid-two { grid-template-columns: 1fr; }
+  .conversation-mirror-settings .form-actions { flex-wrap: wrap; }
+}
+/* Conversation organization and search controls */
+.thread-item.pinned { border-left: 2px solid var(--accent, #0b8f73); }
+.thread-flag { font-size: 11px; margin-right: 4px; }
+.thread-tags { display: inline-flex; gap: 4px; margin-left: 6px; }
+.thread-tags em { font-style: normal; color: var(--muted-text, #718084); }
+.search-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-text, #718084); }
+.search-toggle input { accent-color: var(--accent, #0b8f73); }

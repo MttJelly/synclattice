@@ -1,4 +1,4 @@
-# Give Synclattice a semantic, conversation-first color system
+# Give ChatSwitch a semantic, conversation-first color system
 
 Written against: 84e10832b19584d76a77ab52685085622e6e4d2b
 
@@ -7,13 +7,13 @@ Written against: 84e10832b19584d76a77ab52685085622e6e4d2b
 - Surface: `src/renderer/index.html` core workspace, local-history workflow, connection manager, sync, backup, settings, and extensions dialogs; rendered in `qa/multi-window-artifacts/vue-renderer-desktop.png`, `vue-renderer-conversation.png`, `vue-renderer-local-history.png`, and `vue-renderer-sync.png`
 - Problem: the current effective theme uses green-tinted values for the canvas, sidebar, panels, selection, composer, reasoning, and most commands. Hierarchy is therefore carried mostly by brightness, while informational sync state and source-to-private-copy state look like generic settings.
 - Design evidence: the final theme owner in `src/renderer/styles.css` maps `--bg`, `--surface-2`, sidebar, chat, user messages, reasoning, thinking, composer, and dialog chrome to the same green family. The rendered screenshots show this tint across nearly every large surface. Warning and destructive states already have distinct amber and red meanings and must retain them.
-- Owner: the final Synclattice theme layer in `src/renderer/styles.css`, with existing structure and labels in `src/renderer/index.html`
+- Owner: the final ChatSwitch theme layer in `src/renderer/styles.css`, with existing structure and labels in `src/renderer/index.html`
 - Scope and affected surfaces: light and dark core workspace, local-history copy workflow, connection manager, sync, backup, extensions, settings, confirmation, desktop and compact widths
 - Uncertainty: Windows display scaling and live content extremes require isolated visual validation.
 
 ## Design decision
 
-Move large surfaces to a neutral graphite system and reserve emerald for Synclattice identity, selection, and primary commands. Add blue as the informational/synchronization semantic color, keep amber for warning or interrupted states, and keep red for destructive actions only. Increase separation between navigation chrome, reading canvas, raised controls, and modal surfaces without gradients, glow, blur, or decorative cards. In the local-history workflow, use neutral source navigation and an emerald target action so the source-to-private-copy direction is immediately legible.
+Move large surfaces to a neutral graphite system and reserve emerald for ChatSwitch identity, selection, and primary commands. Add blue as the informational/synchronization semantic color, keep amber for warning or interrupted states, and keep red for destructive actions only. Increase separation between navigation chrome, reading canvas, raised controls, and modal surfaces without gradients, glow, blur, or decorative cards. In the local-history workflow, use neutral source navigation and an emerald target action so the source-to-private-copy direction is immediately legible.
 
 ## Reuse
 
@@ -44,7 +44,7 @@ No new component primitive is required. Semantic variables can express the decis
 
 - Inherit: every renderer surface consuming the final variables and shared dialog/control classes.
 - Verify: provider, conversation, running, interruption, queue, local-history, sync, backup, usage, settings, extensions, confirmation, light, dark, desktop, and compact states.
-- Exclude: provider execution, model reasoning, conversation persistence, WebDAV payload design, original client data, packaging, release metadata, publishing, and the user's active Synclattice window.
+- Exclude: provider execution, model reasoning, conversation persistence, WebDAV payload design, original client data, packaging, release metadata, publishing, and the user's active ChatSwitch window.
 
 ## Validation
 

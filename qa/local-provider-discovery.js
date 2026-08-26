@@ -4,11 +4,11 @@ const os = require("node:os");
 const path = require("node:path");
 const { app, safeStorage } = require("electron");
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-local-provider-electron-"));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-local-provider-electron-"));
 const storeRoot = path.join(root, "store");
 const sourceHome = path.join(root, "source-home");
 const profile = path.join(root, "profile");
-process.env.SHARE_MASTER_STORE_ROOT = storeRoot;
+process.env.CHATSWITCH_STORE_ROOT = storeRoot;
 app.setPath("userData", profile);
 
 const { ProviderStore } = require("../src/provider-store");
@@ -57,7 +57,7 @@ async function run() {
   assert.equal(results.every((result) => result.status === "imported"), true);
   const relay = store.list().find((provider) => provider.label === "Electron Fixture Relay");
   assert.ok(relay);
-  assert.equal(store.resolve(relay.id).env.SHARE_MASTER_RELAY_API_KEY, relayKey);
+  assert.equal(store.resolve(relay.id).env.CHATSWITCH_RELAY_API_KEY, relayKey);
   assert.equal(store.resolve("claude").env.ANTHROPIC_AUTH_TOKEN, claudeKey);
   const credentials = fs.readFileSync(path.join(storeRoot, "credentials.json"), "utf8");
   assert.equal(credentials.includes(relayKey), false);

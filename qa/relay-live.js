@@ -4,9 +4,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-app.setName("Synclattice Relay QA");
-process.env.SHARE_MASTER_STORE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "share-master-relay-"));
-const testRecordHome = path.join(process.env.SHARE_MASTER_STORE_ROOT, "records");
+app.setName("ChatSwitch Relay QA");
+process.env.CHATSWITCH_STORE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-relay-"));
+const testRecordHome = path.join(process.env.CHATSWITCH_STORE_ROOT, "records");
 fs.mkdirSync(testRecordHome);
 
 const { CodexServer } = require("../src/codex-server");
@@ -37,13 +37,13 @@ async function run() {
   assert.equal(created.baseUrl, "https://relay.example/v1");
 
   let resolved = store.resolve(created.id);
-  assert.equal(resolved.env.SHARE_MASTER_RELAY_API_KEY, "first-secret");
+  assert.equal(resolved.env.CHATSWITCH_RELAY_API_KEY, "first-secret");
   assert.equal(resolved.args.some((value) => value.includes("first-secret")), false);
   assert.equal(resolved.args.some((value) => value.startsWith("model_catalog_json=")), true);
 
   store.saveProviderKey(created.id, "updated-secret");
   resolved = store.resolve(created.id);
-  assert.equal(resolved.env.SHARE_MASTER_RELAY_API_KEY, "updated-secret");
+  assert.equal(resolved.env.CHATSWITCH_RELAY_API_KEY, "updated-secret");
 
   const server = new CodexServer(resolved, {});
   try {

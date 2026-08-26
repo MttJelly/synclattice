@@ -16,13 +16,13 @@ if (packageLock.version !== packageJson.version || packageLock.packages?.[""]?.v
 if (!changelog.includes(`## [${packageJson.version}]`)) {
   failures.push(`CHANGELOG.md 缺少 ${packageJson.version} 版本条目。`);
 }
-for (const stableAsset of ["Synclattice-portable-win-x64.zip", "Synclattice-setup-win-x64.msi"]) {
+for (const stableAsset of ["ChatSwitch-portable-win-x64.zip", "ChatSwitch-setup-win-x64.msi"]) {
   if (!readme.includes(`/releases/latest/download/${stableAsset}`)) {
     failures.push(`README.md 缺少稳定下载链接：${stableAsset}`);
   }
 }
 
-const hardcodedVersionPattern = /Synclattice\/\d+\.\d+\.\d+/;
+const hardcodedVersionPattern = /ChatSwitch\/\d+\.\d+\.\d+/;
 for (const relative of ["src/codex-server.js", "src/relay-balance.js", "src/claude-models.js"]) {
   if (hardcodedVersionPattern.test(fs.readFileSync(path.join(root, relative), "utf8"))) {
     failures.push(`${relative} 仍包含硬编码客户端版本。`);
@@ -31,7 +31,7 @@ for (const relative of ["src/codex-server.js", "src/relay-balance.js", "src/clau
 
 if (process.argv.includes("--git")) {
   try {
-    const configuredBase = String(process.env.SHARE_MASTER_BASE_REVISION || "").trim();
+    const configuredBase = String(process.env.CHATSWITCH_BASE_REVISION || "").trim();
     let baseline = configuredBase && !/^0+$/.test(configuredBase) ? configuredBase : null;
     if (!baseline) {
       const headPackage = JSON.parse(execFileSync("git", ["show", "HEAD:package.json"], { cwd: root, encoding: "utf8" }));

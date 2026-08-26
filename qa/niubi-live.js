@@ -6,7 +6,7 @@ const { ProviderStore } = require("../src/provider-store");
 const { fetchRelayBalance } = require("../src/relay-balance");
 const { USER_AGENT } = require("../src/app-version");
 
-app.setName("Synclattice");
+app.setName("ChatSwitch");
 
 function responseError(payload, fallback = "request rejected") {
   if (typeof payload?.error === "string") return payload.error;
@@ -15,8 +15,8 @@ function responseError(payload, fallback = "request rejected") {
 
 async function run() {
   await app.whenReady();
-  const setupKey = String(process.env.SHARE_MASTER_SETUP_API_KEY || "").trim();
-  delete process.env.SHARE_MASTER_SETUP_API_KEY;
+  const setupKey = String(process.env.CHATSWITCH_SETUP_API_KEY || "").trim();
+  delete process.env.CHATSWITCH_SETUP_API_KEY;
 
   const store = new ProviderStore();
   if (setupKey) store.saveProviderKey("niubi", setupKey);

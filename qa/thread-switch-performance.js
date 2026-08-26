@@ -134,13 +134,15 @@ async function run() {
       htmlBytes: document.querySelector('#chat-view').innerHTML.length,
       hasEarlierControl: Boolean(document.querySelector('.load-earlier-turns')),
       exposesCommand: document.querySelector('#chat-view').textContent.includes('rg --files'),
+      commandToggleCount: document.querySelectorAll('.activity-command-toggle').length,
       exposesCommandOutput: document.querySelector('#chat-view').textContent.includes('fixture/output-')
     };
   })()`);
   assert.equal(result.messages, 80);
   assert.equal(result.activities, 40);
   assert.equal(result.hasEarlierControl, true);
-  assert.equal(result.exposesCommand, false);
+  assert.equal(result.exposesCommand, true);
+  assert.ok(result.commandToggleCount > 0);
   assert.equal(result.exposesCommandOutput, false);
   assert.ok(result.firstRenderMs < 10000, `Synthetic conversation render took ${result.firstRenderMs.toFixed(1)} ms.`);
   assert.ok(

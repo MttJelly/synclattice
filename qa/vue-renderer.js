@@ -13,6 +13,7 @@ const compactScreenshot = path.join(artifactRoot, "vue-renderer-compact.png");
 const conversationScreenshot = path.join(artifactRoot, "vue-renderer-conversation.png");
 const attachmentScreenshot = path.join(artifactRoot, "vue-renderer-attachment.png");
 const localHistoryScreenshot = path.join(artifactRoot, "vue-renderer-local-history.png");
+const filePreviewScreenshot = path.join(artifactRoot, "vue-renderer-file-preview.png");
 const localProviderScreenshot = path.join(artifactRoot, "vue-renderer-local-providers.png");
 const usageScreenshot = path.join(artifactRoot, "vue-renderer-usage.png");
 const usageCompactScreenshot = path.join(artifactRoot, "vue-renderer-usage-compact.png");
@@ -45,9 +46,9 @@ async function rendererSnapshot(window) {
       };
     });
     return {
-    vueMounted: Boolean(window.shareMasterVue),
+    vueMounted: Boolean(window.chatSwitchVue),
     wordmarkIconLoaded: Boolean(document.querySelector('.wordmark-icon')?.complete && document.querySelector('.wordmark-icon')?.naturalWidth),
-    stateExposed: Boolean(window.shareMasterState),
+    stateExposed: Boolean(window.chatSwitchState),
     pending: document.querySelector('#app').classList.contains('vue-pending'),
     providerDialogVisible: !document.querySelector('#provider-overlay').classList.contains('hidden'),
     connectionDialogVisible: !document.querySelector('#connection-overlay').classList.contains('hidden'),
@@ -136,7 +137,7 @@ async function run() {
   const extensionFixture = {
     skills: [
       { name: "nature-writing", description: "Draft and restructure technical writing", path: "F:\\private\\nature-writing\\SKILL.md", enabled: true, removable: true, source: "F:\\private\\installed\\nature-writing" },
-      { name: "figure-designer", description: "Design submission-grade figures", path: "F:\\private\\figure-designer\\SKILL.md", enabled: false, source: "Synclattice 镜像库" },
+      { name: "figure-designer", description: "Design submission-grade figures", path: "F:\\private\\figure-designer\\SKILL.md", enabled: false, source: "ChatSwitch 镜像库" },
     ],
     prompts: [
       { id: "prompt_fixture", name: "summarize", description: "提炼当前内容", content: "请提炼当前内容的关键结论。", createdAt: Date.now(), updatedAt: Date.now() },
@@ -147,8 +148,8 @@ async function run() {
   };
   const syncFixture = {
     backend: "webdav",
-    directory: "F:\\Synclattice Sync",
-    webdavUrl: "https://dav.example.test/synclattice/",
+    directory: "F:\\ChatSwitch Sync",
+    webdavUrl: "https://dav.example.test/chatswitch/",
     hasWebdavCredentials: true,
     autoSync: true,
     lastSyncedAt: Date.now() - 60000,
@@ -171,6 +172,7 @@ async function run() {
   const windowThemeRequests = [];
   const approvalResponses = [];
   const localHistoryImportRequests = [];
+  const localHistoryBulkImportRequests = [];
   let clipboardPasteRequests = 0;
   let pendingSteerResolve = null;
   let importedLocalHistoryThread = null;
@@ -178,6 +180,7 @@ async function run() {
   let officialLoginRequests = 0;
   const officialLoginProviderIds = [];
   const accountAddRequests = [];
+  const providerProbeRequests = [];
   let accountFixtureProviderId = null;
   let officialAuthenticated = false;
   ipcMain.handle("app:bootstrap", () => ({
@@ -213,7 +216,7 @@ async function run() {
     promptTemplates: extensionFixture.prompts,
     mcpServers: extensionFixture.mcpServers,
     runningTaskIds: [],
-    recordHome: path.join(root, "share-master-data", "conversations"),
+    recordHome: path.join(root, "chatswitch-data", "conversations"),
   }));
   ipcMain.on("window:set-theme", (_event, theme) => windowThemeRequests.push(theme));
   ipcMain.handle("extension:list", () => structuredClone(extensionFixture));
@@ -265,10 +268,13 @@ async function run() {
     updatedAt: Date.now(),
   }));
   ipcMain.handle("usage:clear", () => ({ removed: 3, providerId: null }));
-  ipcMain.handle("provider:probe-models", (_event, input) => ({
-    models: [input.providerId === "qwen-fixture" ? "qwen-plus" : "deepseek-chat"],
-    latencyMs: input.providerId === "qwen-fixture" ? 48 : 36,
-  }));
+  ipcMain.handle("provider:probe-models", (_event, input) => {
+    providerProbeRequests.push(structuredClone(input || {}));
+    return {
+      models: [input.providerId === "qwen-fixture" ? "qwen-plus" : "deepseek-chat"],
+      latencyMs: input.providerId === "qwen-fixture" ? 48 : 36,
+    };
+  });
   ipcMain.handle("codex:connect", (_event, providerId) => {
     connectRequests.push(providerId);
     if (providerId === "official" || providerId === accountFixtureProviderId) {
@@ -355,6 +361,14 @@ async function run() {
     data: importedLocalHistoryThread ? [structuredClone(importedLocalHistoryThread)] : [],
     nextCursor: null,
   }));
+  ipcMain.handle("codex:list-local", () => ({
+    data: importedLocalHistoryThread ? [structuredClone(importedLocalHistoryThread)] : [],
+    nextCursor: null,
+  }));
+  ipcMain.handle("codex:read-local", (_event, threadId) => {
+    if (threadId !== importedLocalHistoryThread?.id) throw new Error("未找到本地私有会话。");
+    return { thread: structuredClone(importedLocalHistoryThread) };
+  });
   ipcMain.handle("codex:models", () => ({
     data: [{ id: "deepseek-chat", model: "deepseek-chat", displayName: "DeepSeek Chat", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: ["low", "medium", "high"] }],
     nextCursor: null,
@@ -430,10 +444,10 @@ async function run() {
     snippet: `消息正文命中：${query}`,
   }]));
   ipcMain.handle("backup:list", () => ([
-    { name: "share-master-backup-latest.json", createdAt: Date.now(), size: 24576 },
-    { name: "share-master-backup-previous.json", createdAt: Date.now() - 21600000, size: 23800 },
+    { name: "chatswitch-backup-latest.json", createdAt: Date.now(), size: 24576 },
+    { name: "chatswitch-backup-previous.json", createdAt: Date.now() - 21600000, size: 23800 },
   ]));
-  ipcMain.handle("backup:create", () => ({ created: true, name: "share-master-backup-latest.json", createdAt: Date.now() }));
+  ipcMain.handle("backup:create", () => ({ created: true, name: "chatswitch-backup-latest.json", createdAt: Date.now() }));
   ipcMain.handle("backup:restore", (_event, name) => ({ restored: true, name, restoredAt: Date.now() }));
   ipcMain.handle("sync:status", () => structuredClone(syncFixture));
   ipcMain.handle("sync:configure", (_event, input) => ({ ...structuredClone(syncFixture), ...input }));
@@ -449,9 +463,18 @@ async function run() {
     status: "available",
     currentVersion: APP_VERSION,
     latestVersion: "0.2.0",
-    releaseUrl: "https://github.com/MttJelly/synclattice/releases/tag/v0.2.0",
+    releaseUrl: "https://github.com/MttJelly/chatswitch/releases/tag/v0.2.0",
     message: `发现新版本 v0.2.0，当前为 v${APP_VERSION}。`,
   }));
+  ipcMain.handle("file:preview", (_event, target) => ({
+    filePath: String(target || "F:\\codepro\\notes.txt"),
+    fileName: "notes.txt",
+    extension: ".txt",
+    size: 128,
+    kind: "text",
+    content: "ChatSwitch 文件预览测试\n不会调用系统默认程序。",
+  }));
+  ipcMain.handle("file:open", () => ({ opened: true }));
   ipcMain.handle("local-history:sources", () => ([
     { id: "codex", label: "Codex", description: "Codex CLI 与桌面客户端", available: true },
     { id: "claude", label: "Claude Code", description: "Claude Code 本地项目会话", available: true },
@@ -490,7 +513,7 @@ async function run() {
       preview: "读取本地聊天记录",
       cwd: "F:\\codepro",
       model: "gpt-fixture",
-      modelProvider: "synclattice-import",
+      modelProvider: "chatswitch-import",
       createdAt: Math.floor(Date.now() / 1000) - 60,
       updatedAt: Math.floor(Date.now() / 1000),
       recencyAt: Math.floor(Date.now() / 1000),
@@ -504,6 +527,10 @@ async function run() {
       truncated: false,
       thread: structuredClone(importedLocalHistoryThread),
     };
+  });
+  ipcMain.handle("local-history:import-all", (_event, input) => {
+    localHistoryBulkImportRequests.push(structuredClone(input));
+    return { total: 4, imported: 4, duplicate: 0, failed: 0, errors: [] };
   });
   ipcMain.handle("local-providers:discover", () => ({
     sources: ["Codex · 用户配置"],
@@ -549,7 +576,7 @@ async function run() {
   await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const started = Date.now();
     const timer = setInterval(() => {
-      if (window.shareMasterVue && document.querySelectorAll('.provider-option').length === 3) {
+      if (window.chatSwitchVue && document.querySelectorAll('.provider-option').length === 3) {
         clearInterval(timer);
         resolve();
       } else if (Date.now() - started > 10000) {
@@ -573,6 +600,9 @@ async function run() {
       sendDisabled: document.querySelector('#send-button').disabled,
       error: document.querySelector('#provider-error').textContent,
       loginButtonVisible: !document.querySelector('#official-login-button').classList.contains('hidden'),
+      loginButtonText: document.querySelector('#official-login-button').textContent.replace(/\s+/g, ' ').trim(),
+      claudeOfficialEntryVisible: !document.querySelector('#claude-official-entry-button').classList.contains('hidden'),
+      claudeOfficialEntryText: document.querySelector('#claude-official-entry-button').textContent.replace(/\s+/g, ' ').trim(),
       accountPanelText: document.querySelector('#account-panel').textContent.replace(/\s+/g, ' ').trim(),
       localHistoryEnabled: !document.querySelector('#local-history-button').disabled,
     };
@@ -584,7 +614,19 @@ async function run() {
     }
     const localHistoryVisible = !document.querySelector('#local-history-overlay').classList.contains('hidden');
     document.querySelector('#local-history-close-button').click();
-    return { ...beforeHistory, localHistoryVisible };
+    document.querySelector('#claude-official-entry-button').click();
+    const claudeStarted = Date.now();
+    while (document.querySelector('#claude-overlay').classList.contains('hidden')) {
+      if (Date.now() - claudeStarted > 3000) throw new Error('Claude official entry did not open.');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const claudeOfficialFlow = {
+      visible: true,
+      buttonText: document.querySelector('#claude-official-login-button').textContent.replace(/\s+/g, ' ').trim(),
+      tokenLabel: document.querySelector('#claude-api-key').previousElementSibling.textContent.trim(),
+    };
+    document.querySelector('#claude-close-button').click();
+    return { ...beforeHistory, localHistoryVisible, claudeOfficialFlow };
   })()`);
   const loginFlow = await window.webContents.executeJavaScript(`(async () => {
     const login = document.querySelector('#official-login-button');
@@ -680,6 +722,32 @@ async function run() {
     document.querySelector('#close-connection-button').click();
     return result;
   })()`);
+  const storedRelayKeyFlow = await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('[data-provider-row="deepseek-fixture"] .provider-configure').click();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const form = document.querySelector('#relay-form');
+    const key = form.elements.apiKey;
+    const before = {
+      value: key.value,
+      required: key.required,
+      masked: key.dataset.maskedCredential,
+      helper: document.querySelector('#provider-api-key-help').textContent.replace(/\s+/g, ' ').trim(),
+    };
+    document.querySelector('#provider-load-models').click();
+    const started = Date.now();
+    while (!document.querySelector('#provider-model-status').textContent.includes('连接成功')) {
+      if (Date.now() - started > 3000) throw new Error('Stored relay key probe timed out.');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const result = {
+      ...before,
+      busyAfter: document.querySelector('#provider-load-models').hasAttribute('aria-busy'),
+      error: document.querySelector('#connection-error').textContent,
+    };
+    document.querySelector('#close-connection-button').click();
+    return result;
+  })()`);
+  storedRelayKeyFlow.probeRequest = structuredClone(providerProbeRequests.at(-1) || null);
   const accountStatusRequestOffset = accountStatusRequests;
   const accountUsage = await window.webContents.executeJavaScript(`(async () => {
     state.connected = true;
@@ -770,6 +838,8 @@ async function run() {
             { type: 'summary_text', text: '对比度和高频操作路径，再确定视觉调整。这个摘要故意写得更长，用于确认 DeepSeek、Codex、Claude 以及工具执行输出等过程卡片都能使用完整的会话宽度，而不会被挤成狭窄的小框。' },
             { type: 'summary_text', text: '\\n\\n第二段继续验证长文本换行、可读行高和暗色主题对比度。' },
           ] },
+          { id: 'command-1', type: 'commandExecution', command: 'Get-ChildItem -Force "F:\\\\codepro\\\\src" | Select-Object -First 20', status: '已完成' },
+          { id: 'file-change-1', type: 'fileChange', path: 'F:\\\\codepro\\\\src\\\\renderer\\\\app.js', diff: '@@ -1,2 +1,3 @@\\n+增加修改内容查看入口\\n-旧的占位文本', status: '已完成' },
           { id: 'agent-1', type: 'agentMessage', text: '## 优化重点\\n\\n- 收紧侧栏层级，让 Project 与会话更容易扫描。\\n- 保持输入区稳定，模型切换不应改变布局。\\n- 对运行中、已完成和错误状态使用明确但克制的提示。\\n\\n这些调整不会改变现有聊天记录或模型配置。' }
         ]
       }, {
@@ -839,6 +909,10 @@ async function run() {
       effortOptions: [...document.querySelector('#session-effort').options].map((option) => option.value),
       effortEnabled: !document.querySelector('#session-effort').disabled,
       reasoningText: reasoningOutput?.textContent || '',
+      commandButtonVisible: Boolean(document.querySelector('.activity-command-toggle')),
+      commandInitiallyHidden: document.querySelector('.activity-command')?.classList.contains('hidden') || false,
+      changeButtonVisible: Boolean(document.querySelector('[data-activity-id="file-change-1"] .activity-command-toggle')),
+      changeInitiallyHidden: document.querySelector('[data-activity-id="file-change-1"] .activity-command')?.classList.contains('hidden') || false,
       thinkingVisible: Boolean(document.querySelector('.thinking-indicator')),
       thinkingText: document.querySelector('.thinking-indicator')?.textContent.replace(/\s+/g, ' ').trim() || '',
       thinkingIsLast: document.querySelector('#chat-view').lastElementChild?.classList.contains('thinking-indicator') || false,
@@ -853,10 +927,38 @@ async function run() {
       composerFooterOverflow: document.querySelector('.composer-footer').scrollWidth > document.querySelector('.composer-footer').clientWidth
     };
     setThreadRunning(state.activeThread.id, false);
+    const commandButton = document.querySelector('.activity-command-toggle');
+    commandButton?.click();
+    snapshot.commandExpanded = document.querySelector('.activity-command')?.textContent || '';
+    snapshot.commandToggleLabel = commandButton?.textContent.replace(/\\s+/g, ' ').trim() || '';
+    commandButton?.click();
+    const changeButton = document.querySelector('[data-activity-id="file-change-1"] .activity-command-toggle');
+    changeButton?.click();
+    snapshot.changeExpanded = document.querySelector('[data-activity-id="file-change-1"] .activity-command')?.textContent || '';
+    snapshot.changeToggleLabel = changeButton?.textContent.replace(/\\s+/g, ' ').trim() || '';
+    changeButton?.click();
     snapshot.thinkingHiddenAfterCompletion = !document.querySelector('.thinking-indicator');
     setThreadRunning(state.activeThread.id, true, 'turn-running');
     return snapshot;
   })()`);
+  window.webContents.send("codex:event", {
+    method: "item/fileChange/outputDelta",
+    params: {
+      threadId: "vue-conversation-fixture",
+      turnId: "turn-1",
+      itemId: "file-change-1",
+      delta: "\\n+流式增量也被保留",
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  Object.assign(conversation, await window.webContents.executeJavaScript(`(() => {
+    const row = document.querySelector('[data-activity-id="file-change-1"]');
+    return {
+      streamedChange: row?.querySelector('.activity-command')?.textContent || '',
+      streamedLabel: row?.querySelector('code')?.textContent || '',
+      streamedPath: row?.dataset.activityDetails || '',
+    };
+  })()`));
   window.setSize(900, 640);
   await new Promise((resolve) => setTimeout(resolve, 180));
   Object.assign(conversation, await window.webContents.executeJavaScript(`(() => {
@@ -936,8 +1038,8 @@ async function run() {
     window.confirm = () => { window.__qaNativeConfirmCalls += 1; return true; };
     window.__qaConfirmationPromise = confirmAction({
       eyebrow: '会话管理',
-      title: '从 Synclattice 中移除这个会话？',
-      description: '移除后可在一小时内恢复，到期后会从 Synclattice 列表清除。',
+      title: '从 ChatSwitch 中移除这个会话？',
+      description: '移除后可在一小时内恢复，到期后会从 ChatSwitch 列表清除。',
       detail: '原始 ChatGPT、Codex 和 Claude 会话记录完全不变。',
       confirmLabel: '移除会话',
     });
@@ -1257,7 +1359,8 @@ async function run() {
     const tray = {
       count: document.querySelectorAll('#attachment-list .attachment-item').length,
       filename: document.querySelector('.attachment-copy strong')?.textContent || '',
-      reactiveCount: SynclatticeVueRuntime.attachmentUi.items.length,
+      reactiveCount: ChatSwitchVueRuntime.attachmentUi.items.length,
+      typeLabels: [...document.querySelectorAll('#attachment-list .attachment-copy small')].map((node) => node.textContent),
       ignoredMessage: document.querySelector('#status-toast').textContent,
     };
     const imageMessage = appendUserMessage({
@@ -1269,7 +1372,13 @@ async function run() {
     document.querySelector('.attachment-copy-button').click();
     await new Promise((resolve) => setTimeout(resolve, 40));
     tray.conversationCopyButtons = imageMessage.querySelectorAll('.message-media-copy').length;
-    tray.trayCopyButtons = document.querySelectorAll('.attachment-copy-button').length;
+    tray.trayActionButtons = document.querySelectorAll('.attachment-copy-button').length;
+    document.querySelectorAll('.attachment-copy-button')[1]?.click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    tray.documentPreviewVisible = !document.querySelector('#file-preview-overlay').classList.contains('hidden');
+    tray.documentPreviewTitle = document.querySelector('#file-preview-title')?.textContent || '';
+    document.querySelector('#file-preview-done-button')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 40));
     const transfer = new DataTransfer();
     transfer.items.add(new File(['image'], 'drop.png', { type: 'image/png' }));
     window.dispatchEvent(new DragEvent('dragenter', { dataTransfer: transfer }));
@@ -1288,7 +1397,7 @@ async function run() {
     await new Promise((resolve) => setTimeout(resolve, 50));
     return {
       countAfterRemove: document.querySelectorAll('#attachment-list .attachment-item').length,
-      reactiveCountAfterRemove: SynclatticeVueRuntime.attachmentUi.items.length,
+      reactiveCountAfterRemove: ChatSwitchVueRuntime.attachmentUi.items.length,
     };
   })()`));
   await window.webContents.executeJavaScript("(async () => { await openLocalHistoryDialog(); await openLocalHistoryConversation(state.localHistoryConversations[0]); })()");
@@ -1304,6 +1413,19 @@ async function run() {
     bodyOverflow: document.body.scrollWidth > document.body.clientWidth || document.body.scrollHeight > document.body.clientHeight,
     dialogOverflow: document.querySelector('.local-history-dialog').scrollHeight > document.querySelector('.local-history-dialog').clientHeight
   }))()`);
+  Object.assign(localHistory, await window.webContents.executeJavaScript(`(async () => {
+    const bulkButton = document.querySelector('#local-history-import-all-button');
+    const enabledBefore = !bulkButton.disabled;
+    bulkButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const confirmationVisible = Boolean(document.querySelector('#confirmation-overlay:not(.hidden)'));
+    const started = Date.now();
+    while (!document.querySelector('#local-history-summary').textContent.includes('批量完成')) {
+      if (Date.now() - started > 5000) throw new Error('Local history bulk import timed out.');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return { bulkEnabledBefore: enabledBefore, bulkConfirmationVisible: confirmationVisible, bulkSummary: document.querySelector('#local-history-summary').textContent };
+  })()`));
   Object.assign(localHistory, await window.webContents.executeJavaScript(`(async () => {
     const button = document.querySelector('.local-history-import-button');
     const buttonLabel = button?.textContent || '';
@@ -1323,6 +1445,21 @@ async function run() {
     };
   })()`));
   localHistory.importRequests = structuredClone(localHistoryImportRequests);
+  localHistory.bulkImportRequests = structuredClone(localHistoryBulkImportRequests);
+  const filePreview = await window.webContents.executeJavaScript(`(async () => {
+    await openFilePreview('F:\\\\codepro\\\\notes.txt');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    return {
+      visible: !document.querySelector('#file-preview-overlay').classList.contains('hidden'),
+      title: document.querySelector('#file-preview-title')?.textContent || '',
+      meta: document.querySelector('#file-preview-meta')?.textContent || '',
+      content: document.querySelector('#file-preview-text')?.textContent || '',
+      systemButton: Boolean(document.querySelector('#file-preview-open-system')),
+      bodyOverflow: document.body.scrollWidth > document.body.clientWidth || document.body.scrollHeight > document.body.clientHeight,
+    };
+  })()`);
+  fs.writeFileSync(filePreviewScreenshot, (await capturePageWithRetry(window)).toPNG());
+  await window.webContents.executeJavaScript("closeFilePreview()");
   await window.webContents.executeJavaScript("closeLocalHistoryDialog(); openLocalProviderDialog()");
   await new Promise((resolve) => setTimeout(resolve, 100));
   fs.writeFileSync(localProviderScreenshot, (await capturePageWithRetry(window)).toPNG());
@@ -1601,6 +1738,12 @@ async function run() {
   assert.equal(authGate.sendDisabled, true);
   assert.match(authGate.error, /尚未登录 ChatGPT/);
   assert.equal(authGate.loginButtonVisible, true);
+  assert.match(authGate.loginButtonText, /ChatGPT.*Codex/);
+  assert.equal(authGate.claudeOfficialEntryVisible, true);
+  assert.match(authGate.claudeOfficialEntryText, /Claude Code/);
+  assert.equal(authGate.claudeOfficialFlow.visible, true);
+  assert.match(authGate.claudeOfficialFlow.buttonText, /Claude 官方登录/);
+  assert.equal(authGate.claudeOfficialFlow.tokenLabel, "API Token");
   assert.match(authGate.accountPanelText, /尚未登录/);
   assert.equal(authGate.localHistoryEnabled, true);
   assert.equal(authGate.localHistoryVisible, true);
@@ -1630,6 +1773,14 @@ async function run() {
   assert.equal(relayModelFlow.selected, "deepseek-chat");
   assert.equal(relayModelFlow.inputValue, "deepseek-chat");
   assert.match(relayModelFlow.helper, /\/models/);
+  assert.equal(storedRelayKeyFlow.value, "********");
+  assert.equal(storedRelayKeyFlow.required, false);
+  assert.equal(storedRelayKeyFlow.masked, "true");
+  assert.match(storedRelayKeyFlow.helper, /已配置/);
+  assert.equal(storedRelayKeyFlow.busyAfter, false);
+  assert.equal(storedRelayKeyFlow.error, "");
+  assert.equal(storedRelayKeyFlow.probeRequest.providerId, "deepseek-fixture");
+  assert.equal(storedRelayKeyFlow.probeRequest.apiKey, "");
   assert.equal(accountUsage.quotaRows, 2);
   assert.equal(accountUsage.progressBars, 2);
   assert.deepEqual(accountUsage.progressValues, ["77.5", "52"]);
@@ -1652,7 +1803,7 @@ async function run() {
   assert.equal(desktop.bodyOverflow, false);
   assert.equal(desktop.fatal, null);
   assert.notEqual(desktop.formActionsBackground, "rgb(255, 255, 255)");
-  assert.deepEqual(desktop.providerGroups, ["OpenAI 账号", "Chat Completions 模型"]);
+  assert.deepEqual(desktop.providerGroups, ["ChatGPT / Codex 账号", "Chat Completions 模型"]);
   assert.deepEqual(desktop.actionGroups, ["连接管理", "数据与同步", "应用"]);
   assert.equal(desktop.selectedProviderRows, 1);
   assert.equal(desktop.providerActionLayout.length, 4);
@@ -1679,6 +1830,17 @@ async function run() {
   assert.ok(conversation.reasoningLineHeight >= 19);
   assert.match(conversation.reasoningText, /^先检查信息层级、对比度/);
   assert.doesNotMatch(conversation.reasoningText, /先检查信息层级、\s+对比度/);
+  assert.equal(conversation.commandButtonVisible, true);
+  assert.equal(conversation.commandInitiallyHidden, true);
+  assert.match(conversation.commandExpanded, /Get-ChildItem -Force/);
+  assert.match(conversation.commandToggleLabel, /收起命令/);
+  assert.equal(conversation.changeButtonVisible, true);
+  assert.equal(conversation.changeInitiallyHidden, true);
+  assert.match(conversation.changeExpanded, /增加修改内容查看入口/);
+  assert.match(conversation.changeToggleLabel, /收起/);
+  assert.match(conversation.streamedChange, /流式增量也被保留/);
+  assert.equal(conversation.streamedLabel, "修改文件");
+  assert.match(conversation.streamedPath, /src[\\/]renderer[\\/]app\.js/);
   assert.equal(conversation.thinkingVisible, true);
   assert.match(conversation.thinkingText, /正在思考/);
   assert.equal(conversation.thinkingIsLast, true);
@@ -1805,30 +1967,33 @@ async function run() {
   assert.equal(restartRecovery.panelHidden, true);
   assert.deepEqual(restartRecovery.started, ["重启后只发送一次"]);
   assert.deepEqual(restartRecovery.claimed, ["restart-queue-message"]);
-  assert.deepEqual({ added: attachments.added, unsupported: attachments.unsupported }, { added: 1, unsupported: 1 });
+  assert.deepEqual({ added: attachments.added, unsupported: attachments.unsupported }, { added: 1, unsupported: 0 });
   assert.equal(attachments.pasteCanceled, true);
   assert.equal(attachments.pastedCount, 1);
   assert.equal(attachments.pastedFilename, "vue-renderer-conversation.png");
   assert.equal(attachments.clipboardPasteRequests, 1);
-  assert.equal(attachments.count, 1);
-  assert.equal(attachments.reactiveCount, 1);
+  assert.equal(attachments.count, 2);
+  assert.equal(attachments.reactiveCount, 2);
   assert.equal(attachments.filename, "vue-renderer-conversation.png");
-  assert.match(attachments.ignoredMessage, /已忽略 1 个非图片文件/);
+  assert.deepEqual(attachments.typeLabels, ["图片附件", "文档附件"]);
+  assert.equal(attachments.ignoredMessage, "已从剪贴板添加 1 个附件。");
   assert.equal(attachments.overlayVisible, true);
   assert.equal(attachments.overlayCleared, true);
   assert.equal(attachments.conversationCopyButtons, 1);
-  assert.equal(attachments.trayCopyButtons, 1);
+  assert.equal(attachments.trayActionButtons, 2);
+  assert.equal(attachments.documentPreviewVisible, true);
+  assert.equal(attachments.documentPreviewTitle, "notes.txt");
   assert.deepEqual(attachments.copiedImages, [
     { path: conversationScreenshot },
     { path: conversationScreenshot },
   ]);
-  assert.equal(attachments.countAfterRemove, 0);
-  assert.equal(attachments.reactiveCountAfterRemove, 0);
+  assert.equal(attachments.countAfterRemove, 1);
+  assert.equal(attachments.reactiveCountAfterRemove, 1);
   assert.deepEqual({ visible: localHistory.visible, sources: localHistory.sources, conversations: localHistory.conversations, messages: localHistory.messages }, { visible: true, sources: 2, conversations: 2, messages: 3 });
   assert.equal(localHistory.title, "本地记录功能迭代");
   assert.match(localHistory.readOnlyNotice, /只读浏览原始会话/);
-  assert.match(localHistory.readOnlyNotice, /Synclattice 私有记录/);
-  assert.match(localHistory.buttonLabel, /复制到 Synclattice/);
+  assert.match(localHistory.readOnlyNotice, /ChatSwitch 私有记录/);
+  assert.match(localHistory.buttonLabel, /复制到 ChatSwitch/);
   assert.equal(localHistory.statusRole, "status");
   assert.equal(localHistory.overlayClosedAfterImport, true);
   assert.equal(localHistory.openedThreadId, "local-imported-history-fixture");
@@ -1836,6 +2001,16 @@ async function run() {
   assert.deepEqual(localHistory.importRequests, [{ conversationId: "codex-local-1" }]);
   assert.equal(localHistory.bodyOverflow, false);
   assert.equal(localHistory.dialogOverflow, false);
+  assert.equal(localHistory.bulkEnabledBefore, true);
+  assert.equal(localHistory.bulkConfirmationVisible, false);
+  assert.match(localHistory.bulkSummary, /批量完成：导入 4/);
+  assert.deepEqual(localHistory.bulkImportRequests, [{ sourceIds: ["codex", "claude"], search: "" }]);
+  assert.equal(filePreview.visible, true);
+  assert.equal(filePreview.title, "notes.txt");
+  assert.match(filePreview.meta, /TXT/);
+  assert.match(filePreview.content, /文件预览测试/);
+  assert.equal(filePreview.systemButton, true);
+  assert.equal(filePreview.bodyOverflow, false);
   assert.deepEqual(
     { visible: localProviders.visible, rows: localProviders.rows, selectable: localProviders.selectable },
     { visible: true, rows: 3, selectable: 1 },
@@ -1856,7 +2031,7 @@ async function run() {
   assert.equal(backup.bodyOverflow, false);
   assert.deepEqual(
     { visible: sync.visible, rows: sync.rows, directory: sync.directory, webdavVisible: sync.webdavVisible, webdavUrl: sync.webdavUrl, pullLabel: sync.pullLabel },
-    { visible: true, rows: 2, directory: "F:\\Synclattice Sync", webdavVisible: true, webdavUrl: "https://dav.example.test/synclattice/", pullLabel: "使用 WebDAV" },
+    { visible: true, rows: 2, directory: "F:\\ChatSwitch Sync", webdavVisible: true, webdavUrl: "https://dav.example.test/chatswitch/", pullLabel: "使用 WebDAV" },
   );
   assert.equal(sync.bodyOverflow, false);
   assert.equal(sync.dialogOverflow, false);
@@ -1921,6 +2096,7 @@ async function run() {
     restartRecovery,
     attachments,
     localHistory,
+    filePreview,
     localProviders,
     usage,
     backup,
@@ -1934,7 +2110,7 @@ async function run() {
     windowThemeRequests,
     interactiveLayoutAudits,
     errors,
-    screenshots: [accountUsageScreenshot, lightDesktopScreenshot, desktopScreenshot, compactScreenshot, conversationScreenshot, confirmationScreenshot, attachmentScreenshot, localHistoryScreenshot, localProviderScreenshot, usageScreenshot, usageCompactScreenshot, backupScreenshot, syncScreenshot, appSettingsScreenshot, importPreviewScreenshot, healthScreenshot, extensionsScreenshot, skillInstallScreenshot, darkExtensionsScreenshot],
+    screenshots: [accountUsageScreenshot, lightDesktopScreenshot, desktopScreenshot, compactScreenshot, conversationScreenshot, confirmationScreenshot, attachmentScreenshot, localHistoryScreenshot, filePreviewScreenshot, localProviderScreenshot, usageScreenshot, usageCompactScreenshot, backupScreenshot, syncScreenshot, appSettingsScreenshot, importPreviewScreenshot, healthScreenshot, extensionsScreenshot, skillInstallScreenshot, darkExtensionsScreenshot],
   }));
   window.destroy();
   app.quit();

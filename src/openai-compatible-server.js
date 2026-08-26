@@ -292,7 +292,7 @@ function importedLocalThread(conversation, now = Date.now()) {
     id,
     name: String(conversation.title || "未命名会话").trim().slice(0, 160),
     preview: String(firstUserText || conversation.title || "本地会话副本").split(/\r?\n/)[0].slice(0, 160),
-    modelProvider: "synclattice-import",
+    modelProvider: "chatswitch-import",
     model: String(conversation.model || "").trim() || null,
     cwd: String(conversation.cwd || "").trim() || null,
     createdAt: Math.floor((Number(conversation.createdAt) || Number(conversation.updatedAt) || Number(now)) / 1000),
@@ -493,8 +493,22 @@ class OpenAICompatibleServer extends EventEmitter {
       recencyAt: thread.updatedAt,
       turns: [],
       _syncedFromCodex: Boolean(thread._syncedFromCodex),
+      _importedLocalHistory: thread._importedLocalHistory || null,
       _historyEngine: "openai-compatible",
     };
+  }
+
+  async listLocalThreads(searchTerm = "") {
+    const query = String(searchTerm || "").trim().toLocaleLowerCase("zh-CN");
+    const data = fs.readdirSync(this.root, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => readJson(path.join(this.root, entry.name)))
+      .filter((thread) => thread?.id && Array.isArray(thread.turns))
+      .map((thread) => this.summary(thread))
+      .filter((thread) => !query || `${thread.name || ""} ${thread.preview || ""}`
+        .toLocaleLowerCase("zh-CN").includes(query))
+      .sort((left, right) => right.recencyAt - left.recencyAt);
+    return { data, nextCursor: null, backwardsCursor: null };
   }
 
   codexThreadFiles(archived = false) {
@@ -611,7 +625,8 @@ class OpenAICompatibleServer extends EventEmitter {
     if (this.activeTurns.has(threadId)) return Promise.reject(new Error("该会话仍在生成回复。"));
     const prompt = String(text || "").trim();
     const imageInputs = Array.isArray(options.imageInputs) ? options.imageInputs : [];
-    if (!prompt && !imageInputs.length) return Promise.reject(new Error("消息内容不能为空。"));
+    const fileInputs = Array.isArray(options.fileInputs) ? options.fileInputs : [];
+    if (!prompt && !imageInputs.length && !fileInputs.length) return Promise.reject(new Error("消息内容不能为空。"));
     let thread;
     try {
       thread = this.loadThread(threadId);
@@ -626,6 +641,7 @@ class OpenAICompatibleServer extends EventEmitter {
       content: [
         ...(prompt ? [{ type: "text", text: prompt }] : []),
         ...imageInputs.map((image) => ({ type: "localImage", path: image.path })),
+        ...fileInputs.map((file) => ({ type: "localFile", path: file.path, fileName: file.fileName || String(file.path || "").split(/[\\\\/]/).pop() })),
       ],
     };
     const assistantItem = { id: crypto.randomUUID(), type: "agentMessage", text: "", phase: "final_answer" };
@@ -635,6 +651,7 @@ class OpenAICompatibleServer extends EventEmitter {
       status: "inProgress",
       items: [userItem],
       effort: String(options.effort || "").trim() || null,
+      webSearch: Boolean(options.webSearch),
     };
     thread.turns.push(turn);
     thread.cwd = cwd || thread.cwd;
@@ -755,6 +772,7 @@ class OpenAICompatibleServer extends EventEmitter {
         messages: messagesForThread(thread, imageInputs),
         stream: true,
         ...(turn.effort ? { reasoning_effort: turn.effort } : {}),
+        ...(turn.webSearch ? { web_search_options: { search_context_size: "medium" } } : {}),
       }),
       signal: controller.signal,
     });

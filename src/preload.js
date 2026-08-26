@@ -4,9 +4,9 @@ const pendingNavigation = [];
 const navigationHandlers = new Set();
 async function invokeRendererIpc(channel, ...args) {
   const result = await ipcRenderer.invoke(channel, ...args);
-  const payload = result?.__shareMasterIpcError;
+  const payload = result?.__chatSwitchIpcError;
   if (!payload) return result;
-  const error = new Error(payload.message || "Synclattice 请求失败。");
+  const error = new Error(payload.message || "ChatSwitch 请求失败。");
   if (payload.code) error.code = payload.code;
   if (payload.status !== null && payload.status !== undefined) error.status = payload.status;
   if (payload.requestId) error.requestId = payload.requestId;
@@ -18,7 +18,7 @@ ipcRenderer.on("app:navigate", (_event, value) => {
   else navigationHandlers.forEach((handler) => handler(value));
 });
 
-contextBridge.exposeInMainWorld("codexDeck", {
+contextBridge.exposeInMainWorld("chatSwitch", {
   bootstrap: () => ipcRenderer.invoke("app:bootstrap"),
   newWindow: (payload) => ipcRenderer.invoke("window:new", payload),
   setWindowTheme: (theme) => ipcRenderer.send("window:set-theme", theme),
@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("codexDeck", {
   chooseRecordHome: (current) => ipcRenderer.invoke("dialog:record-home", current),
   chooseSyncDirectory: (current) => ipcRenderer.invoke("dialog:sync-directory", current),
   chooseImages: () => ipcRenderer.invoke("dialog:images"),
+  chooseFiles: () => ipcRenderer.invoke("dialog:files"),
   pasteClipboardImages: () => ipcRenderer.invoke("clipboard:images"),
   chooseSkillFolder: () => ipcRenderer.invoke("dialog:skill-folder"),
   chooseSkillZip: () => ipcRenderer.invoke("dialog:skill-zip"),
@@ -40,14 +41,20 @@ contextBridge.exposeInMainWorld("codexDeck", {
   listLocalHistory: (input) => ipcRenderer.invoke("local-history:list", input),
   readLocalHistory: (input) => ipcRenderer.invoke("local-history:read", input),
   importLocalHistory: (input) => ipcRenderer.invoke("local-history:import", input),
+  importAllLocalHistory: (input) => ipcRenderer.invoke("local-history:import-all", input),
+  conversationMirrorStatus: () => ipcRenderer.invoke("conversation-mirror:status"),
+  configureConversationMirror: (input) => ipcRenderer.invoke("conversation-mirror:configure", input),
+  syncConversationMirrorNow: () => ipcRenderer.invoke("conversation-mirror:run"),
   discoverLocalProviders: () => ipcRenderer.invoke("local-providers:discover"),
   importLocalProviders: (candidateIds) => ipcRenderer.invoke("local-providers:import", candidateIds),
   confirmDeepLinkImport: (input) => ipcRenderer.invoke("deep-link:confirm-import", input),
   officialLogin: (providerId) => ipcRenderer.invoke("auth:official-login", providerId),
+  claudeOfficialLogin: () => ipcRenderer.invoke("auth:claude-login"),
   addRelay: (input) => ipcRenderer.invoke("provider:add-relay", input),
   updateRelay: (input) => ipcRenderer.invoke("provider:update-relay", input),
+  updateBuiltinApi: (input) => ipcRenderer.invoke("provider:update-builtin-api", input),
   saveProviderRoute: (input) => ipcRenderer.invoke("provider:save-route", input),
-  probeProviderModels: (input) => ipcRenderer.invoke("provider:probe-models", input),
+  probeProviderModels: (input) => invokeRendererIpc("provider:probe-models", input),
   addAccount: (input) => ipcRenderer.invoke("provider:add-account", input),
   removeProvider: (providerId) => ipcRenderer.invoke("provider:remove", providerId),
   reorderProviders: (providerIds) => ipcRenderer.invoke("provider:reorder", providerIds),
@@ -75,11 +82,13 @@ contextBridge.exposeInMainWorld("codexDeck", {
   assignThreadToProject: (input) => ipcRenderer.invoke("project:assign-thread", input),
   saveThreadSettings: (input) => ipcRenderer.invoke("thread:save-settings", input),
   renameThreadLocal: (input) => ipcRenderer.invoke("thread:rename-local", input),
+  setThreadDecoration: (input) => ipcRenderer.invoke("thread:set-decoration", input),
   archiveThreadLocal: (threadId) => ipcRenderer.invoke("thread:archive-local", threadId),
   unarchiveThreadLocal: (threadId) => ipcRenderer.invoke("thread:unarchive-local", threadId),
   hideThread: (input) => ipcRenderer.invoke("thread:hide", input),
   restoreThread: (threadId) => ipcRenderer.invoke("thread:restore", threadId),
   deleteThreadNow: (threadId) => ipcRenderer.invoke("thread:delete-now", threadId),
+  exportThread: (input) => ipcRenderer.invoke("thread:export", input),
   saveMessageQueue: (input) => ipcRenderer.invoke("thread:save-message-queue", input),
   claimMessageQueue: (input) => ipcRenderer.invoke("thread:claim-message-queue", input),
   restoreMessageQueue: (input) => ipcRenderer.invoke("thread:restore-message-queue", input),
@@ -88,8 +97,12 @@ contextBridge.exposeInMainWorld("codexDeck", {
   setScheduledTaskEnabled: (input) => ipcRenderer.invoke("task:set-enabled", input),
   runScheduledTaskNow: (taskId) => ipcRenderer.invoke("task:run-now", taskId),
   openExternal: (target) => ipcRenderer.invoke("url:open", target),
+  openFile: (target) => ipcRenderer.invoke("file:open", target),
+  previewFile: (target) => ipcRenderer.invoke("file:preview", target),
+  extractFileText: (targets) => ipcRenderer.invoke("file:extract-text", targets),
   connect: (provider) => invokeRendererIpc("codex:connect", provider),
   listThreads: (query) => invokeRendererIpc("codex:list", query),
+  listLocalThreads: (query) => ipcRenderer.invoke("codex:list-local", query),
   listModels: () => invokeRendererIpc("codex:models"),
   listSkills: (payload) => invokeRendererIpc("codex:skills", payload),
   listExtensions: () => ipcRenderer.invoke("extension:list"),
@@ -103,6 +116,7 @@ contextBridge.exposeInMainWorld("codexDeck", {
   removeMcp: (id) => ipcRenderer.invoke("mcp:remove", id),
   testMcp: (id) => ipcRenderer.invoke("mcp:test", id),
   readThread: (threadId) => invokeRendererIpc("codex:read", threadId),
+  readLocalThread: (threadId) => ipcRenderer.invoke("codex:read-local", threadId),
   readThreadWindow: (payload) => invokeRendererIpc("codex:read-window", payload),
   searchThreads: (query) => invokeRendererIpc("codex:search", query),
   accountStatus: () => invokeRendererIpc("codex:account-status"),

@@ -17,13 +17,13 @@ const result = spawnSync(electron, [`--user-data-dir=${profile}`, root], {
   windowsHide: true,
   env: {
     ...process.env,
-    SHARE_MASTER_STORE_ROOT: store,
-    CODEX_DECK_QA_CLAUDE_TOKEN: "share-master-invalid-qa-token",
-    CODEX_DECK_QA_SCENARIO: "claude-model-fallback",
-    CODEX_DECK_QA_SCREENSHOT: screenshot,
-    CODEX_DECK_QA_DELAY: "9000",
-    CODEX_DECK_QA_WIDTH: "1000",
-    CODEX_DECK_QA_HEIGHT: "720",
+    CHATSWITCH_STORE_ROOT: store,
+    CHATSWITCH_QA_CLAUDE_TOKEN: "chatswitch-invalid-qa-token",
+    CHATSWITCH_QA_SCENARIO: "claude-model-fallback",
+    CHATSWITCH_QA_SCREENSHOT: screenshot,
+    CHATSWITCH_QA_DELAY: "9000",
+    CHATSWITCH_QA_WIDTH: "1000",
+    CHATSWITCH_QA_HEIGHT: "720",
   },
 });
 

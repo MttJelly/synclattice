@@ -1,22 +1,47 @@
 # 更新日志
 
-本文件记录 Synclattice 每个版本的用户可见变化。版本号遵循语义化版本；每次向 GitHub 推送产品更新前，必须先更新版本号和本文件。
+本文件记录 ChatSwitch 每个版本的用户可见变化。版本号遵循语义化版本；每次向 GitHub 推送产品更新前，必须先更新版本号和本文件。
+
+## [0.1.19] - 2026-08-26
+
+### 新增
+
+- 产品品牌、Windows 应用身份、深链协议、启动器、安装包、文档和 GitHub 仓库统一为 ChatSwitch。
+- 支持 PDF、Word、Excel、PowerPoint、文本、JSON、CSV 和 ZIP 文件作为会话附件，并在应用内预览支持的文件。
+- 增加联网搜索开关、会话置顶、收藏、标签，以及 Markdown、HTML、PDF、JSON 单会话导出。
+- 增加命令执行和文件修改活动视图，便于查看模型运行了什么命令、修改了哪些内容。
+- 本地聊天记录支持一键导入当前来源的全部会话，并支持 Codex 历史定时只读副本。
+- 增加 Claude Code 官方登录入口、MCP 管理与检测，以及已有中转连接的 API Key 编辑。
+
+### 优化
+
+- 中转连接必须从供应商模型接口读取可用模型，已保存的 API Key 以 `********` 显示并可直接复用。
+- OpenAI 兼容模型支持通用推理强度选择，并在供应商支持时发送 `reasoning_effort`。
+- README 使用全新的 ChatSwitch 隔离测试截图，并补充功能地图、使用入口、数据边界和平台规划。
+- 新安装保持空白，不自动导入外部账号、API Key 或聊天记录；用户可主动扫描和导入。
+
+### 修复
+
+- 修复切换官方账号与中转连接后，测试模型列表时错误提示 API Key 未配置的问题。
+- 修复只有 ChatGPT/Codex 应用、只有 Codex CLI 或两者都没有时的启动与连接边界。
+- 修复仅安装 Codex App 且缺少归档目录时，本地会话扫描失败的问题。
+- 修复品牌迁移后 Windows 安全存储中的旧凭据无法解密，并保留旧配置、备份和同步文件的升级兼容。
 
 ## [0.1.18] - 2026-08-22
 
 ### 优化
 
-- 清理旧品牌残留，应用入口、深链、截图资源、文档和测试统一使用 Synclattice。
-- 新增 `Start Synclattice.cmd`，旧品牌启动脚本不再保留。
+- 清理旧品牌残留，应用入口、深链、截图资源、文档和测试统一使用 ChatSwitch。
+- 新增 `Start ChatSwitch.cmd`，旧品牌启动脚本不再保留。
 - 更新 WebDAV、主题存储和导出文件的品牌命名。
 
 ## [0.1.17] - 2026-08-22
 
 ### 优化
 
-- 产品品牌统一为 Synclattice，更新 Windows 应用身份、任务栏图标、通知和安装包名称。
-- 启动脚本兼容旧构建目录，同时优先启动新的 Synclattice 可执行文件。
-- GitHub 仓库和发布流程切换到 Synclattice 命名。
+- 产品品牌统一为 ChatSwitch，更新 Windows 应用身份、任务栏图标、通知和安装包名称。
+- 启动脚本兼容旧构建目录，同时优先启动新的 ChatSwitch 可执行文件。
+- GitHub 仓库和发布流程切换到 ChatSwitch 命名。
 
 ## [0.1.16] - 2026-08-21
 
@@ -58,7 +83,7 @@
 ### 修复
 
 - 修复 Windows 启动脚本优先使用旧版运行目录，导致测试时实际打开 `0.1.10` 的问题。
-- 将应用图标作为独立运行资源打入安装包，窗口、任务栏、通知和开始菜单快捷方式统一使用 Synclattice 图标。
+- 将应用图标作为独立运行资源打入安装包，窗口、任务栏、通知和开始菜单快捷方式统一使用 ChatSwitch 图标。
 - 修复发布目录与开始菜单快捷方式不一致时，Windows 仍显示旧图标或通用图标的问题。
 
 ### 优化
@@ -91,14 +116,14 @@
 
 ### 新增
 
-- 本地 Codex、Codex App 和 Claude Code 会话支持只读预览后复制到 Synclattice 私有会话。
-- 重复复制会复用已有私有副本，不覆盖 Synclattice 中已经继续产生的内容。
+- 本地 Codex、Codex App 和 Claude Code 会话支持只读预览后复制到 ChatSwitch 私有会话。
+- 重复复制会复用已有私有副本，不覆盖 ChatSwitch 中已经继续产生的内容。
 
 ### 优化
 
 - 全面更新浅色与深色主题：中性石墨/雾灰作为基底，翡翠色用于品牌和主操作，蓝色用于同步信息，琥珀和红色分别用于警告与危险操作。
 - 本地记录界面改为来源、会话列表、只读预览和私有复制目标的三栏工作流。
-- 同步页面明确区分同步目录与 WebDAV，并标注当前只同步 Synclattice 配置，不同步聊天正文、API Key 或 MCP 密钥。
+- 同步页面明确区分同步目录与 WebDAV，并标注当前只同步 ChatSwitch 配置，不同步聊天正文、API Key 或 MCP 密钥。
 - 优化同步标签、标题栏主题颜色、主按钮对比度和共享导入状态提示。
 
 ### 修复
@@ -111,7 +136,7 @@
 
 ### 优化
 
-- 删除、移除、卸载、清空和恢复等应用内确认操作统一使用 Vue 3 响应式模态框，视觉与 Synclattice 主界面、暗色模式保持一致。
+- 删除、移除、卸载、清空和恢复等应用内确认操作统一使用 Vue 3 响应式模态框，视觉与 ChatSwitch 主界面、暗色模式保持一致。
 - 确认框支持焦点循环、Esc 取消、点击遮罩取消、风险说明和针对操作类型的明确按钮文案。
 - 完全访问权限确认也复用统一 Vue 组件，不再维护第二套弹窗结构和样式。
 - 流式回答与思考摘要增量在主进程合并后再发送到界面；连续输入时优先响应键盘，并延后非关键绘制。
@@ -120,8 +145,8 @@
 
 - 移除 11 处 Windows/Chromium 原生确认窗口，避免确认操作跳出与应用界面割裂的系统样式窗口。
 - 减少长回答生成期间的跨进程消息数量和屏幕外会话布局开销，改善边生成边输入时的卡顿。
-- 开发版启动前强制重新生成 Synclattice 图标，避免窗口继续使用启动前的旧 Electron 图标缓存。
-- 窗口创建时显式绑定 Synclattice 原生图标，覆盖开发版 Electron 进程默认任务栏图标。
+- 开发版启动前强制重新生成 ChatSwitch 图标，避免窗口继续使用启动前的旧 Electron 图标缓存。
+- 窗口创建时显式绑定 ChatSwitch 原生图标，覆盖开发版 Electron 进程默认任务栏图标。
 
 ## [0.1.9] - 2026-08-05
 
@@ -154,7 +179,7 @@
 
 ### 优化
 
-- Windows 通知、开始菜单快捷方式、窗口标题栏与应用图标统一使用 Synclattice 品牌标识。
+- Windows 通知、开始菜单快捷方式、窗口标题栏与应用图标统一使用 ChatSwitch 品牌标识。
 - 重构 README 信息结构，突出版本下载、核心工作流、功能边界与中英文使用文档入口。
 
 ### 修复
@@ -181,8 +206,8 @@
 
 ### 修复
 
-- 将 Windows AppUserModelID 固定为 Synclattice 的应用 ID，修复源码运行时被 Windows 归类为 Electron 并显示默认原子图标的问题。
-- 窗口和托盘在开发运行时统一使用多尺寸 Synclattice ICO，安装版继续使用可执行文件内嵌的同一套图标。
+- 将 Windows AppUserModelID 固定为 ChatSwitch 的应用 ID，修复源码运行时被 Windows 归类为 Electron 并显示默认原子图标的问题。
+- 窗口和托盘在开发运行时统一使用多尺寸 ChatSwitch ICO，安装版继续使用可执行文件内嵌的同一套图标。
 
 ## [0.1.4] - 2026-08-04
 
@@ -208,7 +233,7 @@
 
 ### 新增
 
-- 全新 Synclattice 应用图标，并提供可重复生成 PNG/ICO 的矢量母版与构建脚本。
+- 全新 ChatSwitch 应用图标，并提供可重复生成 PNG/ICO 的矢量母版与构建脚本。
 - 设置页可按 GitHub Release 检查最新发布版本，并在有更新时直接打开下载页面。
 
 ### 优化
@@ -225,7 +250,7 @@
 
 ### 新增
 
-- 修复中断的自定义工具调用记录，在恢复 Synclattice 私有会话前补全明确的取消结果。
+- 修复中断的自定义工具调用记录，在恢复 ChatSwitch 私有会话前补全明确的取消结果。
 - 为权限选择弹窗增加更清晰的说明、状态反馈和焦点恢复。
 
 ### 优化
@@ -241,13 +266,22 @@
 - 修复思考摘要宽度和长文本换行异常。
 - 修复恢复会话时 `Custom tool call output is missing` 导致连接失败的问题。
 
-[0.1.1]: https://github.com/MttJelly/synclattice/compare/v0.1.0...v0.1.1
-[0.1.2]: https://github.com/MttJelly/synclattice/compare/v0.1.1...v0.1.2
-[0.1.3]: https://github.com/MttJelly/synclattice/compare/v0.1.2...v0.1.3
-[0.1.4]: https://github.com/MttJelly/synclattice/compare/v0.1.3...v0.1.4
-[0.1.5]: https://github.com/MttJelly/synclattice/compare/v0.1.4...v0.1.5
-[0.1.6]: https://github.com/MttJelly/synclattice/compare/v0.1.5...v0.1.6
-[0.1.7]: https://github.com/MttJelly/synclattice/compare/v0.1.6...v0.1.7
-[0.1.8]: https://github.com/MttJelly/synclattice/compare/v0.1.7...v0.1.8
-[0.1.9]: https://github.com/MttJelly/synclattice/compare/v0.1.8...v0.1.9
-[0.1.10]: https://github.com/MttJelly/synclattice/compare/v0.1.9...v0.1.10
+[0.1.1]: https://github.com/MttJelly/chatswitch/compare/v0.1.0...v0.1.1
+[0.1.2]: https://github.com/MttJelly/chatswitch/compare/v0.1.1...v0.1.2
+[0.1.3]: https://github.com/MttJelly/chatswitch/compare/v0.1.2...v0.1.3
+[0.1.4]: https://github.com/MttJelly/chatswitch/compare/v0.1.3...v0.1.4
+[0.1.5]: https://github.com/MttJelly/chatswitch/compare/v0.1.4...v0.1.5
+[0.1.6]: https://github.com/MttJelly/chatswitch/compare/v0.1.5...v0.1.6
+[0.1.7]: https://github.com/MttJelly/chatswitch/compare/v0.1.6...v0.1.7
+[0.1.8]: https://github.com/MttJelly/chatswitch/compare/v0.1.7...v0.1.8
+[0.1.9]: https://github.com/MttJelly/chatswitch/compare/v0.1.8...v0.1.9
+[0.1.10]: https://github.com/MttJelly/chatswitch/compare/v0.1.9...v0.1.10
+[0.1.11]: https://github.com/MttJelly/chatswitch/compare/v0.1.10...v0.1.11
+[0.1.12]: https://github.com/MttJelly/chatswitch/compare/v0.1.11...v0.1.12
+[0.1.13]: https://github.com/MttJelly/chatswitch/compare/v0.1.12...v0.1.13
+[0.1.14]: https://github.com/MttJelly/chatswitch/compare/v0.1.13...v0.1.14
+[0.1.15]: https://github.com/MttJelly/chatswitch/compare/v0.1.14...v0.1.15
+[0.1.16]: https://github.com/MttJelly/chatswitch/compare/v0.1.15...v0.1.16
+[0.1.17]: https://github.com/MttJelly/chatswitch/compare/v0.1.16...v0.1.17
+[0.1.18]: https://github.com/MttJelly/chatswitch/compare/v0.1.17...v0.1.18
+[0.1.19]: https://github.com/MttJelly/chatswitch/compare/v0.1.18...v0.1.19

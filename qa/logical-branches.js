@@ -8,8 +8,8 @@ const { OpenAICompatibleServer } = require("../src/openai-compatible-server");
 const root = path.resolve(__dirname, "..");
 const storeRoot = fs.mkdtempSync(path.join(__dirname, ".logical-branch-store-"));
 const profileRoot = fs.mkdtempSync(path.join(__dirname, ".logical-branch-profile-"));
-process.env.SHARE_MASTER_STORE_ROOT = storeRoot;
-process.env.SHARE_MASTER_QA = "1";
+process.env.CHATSWITCH_STORE_ROOT = storeRoot;
+process.env.CHATSWITCH_QA = "1";
 app.setPath("userData", profileRoot);
 process.on("exit", () => {
   try { fs.rmSync(storeRoot, { recursive: true, force: true }); } catch {}
@@ -68,7 +68,7 @@ async function waitUntil(action, predicate, timeoutMs = 15000) {
 
 function invoke(window, method, argument) {
   return window.webContents.executeJavaScript(
-    `window.codexDeck[${JSON.stringify(method)}](${JSON.stringify(argument)})`,
+    `window.chatSwitch[${JSON.stringify(method)}](${JSON.stringify(argument)})`,
   );
 }
 
@@ -136,12 +136,12 @@ async function run() {
     Boolean,
   );
   await waitUntil(
-    () => window.webContents.executeJavaScript("Boolean(window.codexDeck && window.shareMasterVue)"),
+    () => window.webContents.executeJavaScript("Boolean(window.chatSwitch && window.chatSwitchVue)"),
     Boolean,
   );
   await window.webContents.executeJavaScript(`(() => {
     window.__logicalBranchEvents = [];
-    window.codexDeck.onEvent((message) => window.__logicalBranchEvents.push(message));
+    window.chatSwitch.onEvent((message) => window.__logicalBranchEvents.push(message));
   })()`);
 
   await invoke(window, "connect", providerA.id);

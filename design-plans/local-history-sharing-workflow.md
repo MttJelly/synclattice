@@ -1,11 +1,11 @@
-# Make local history a clear Synclattice sharing workflow
+# Make local history a clear ChatSwitch sharing workflow
 
 Written against: 84e10832b19584d76a77ab52685085622e6e4d2b
 
 ## Evidence chain
 
 - Surface: `src/renderer/index.html` local history overlay and its runtime content from `src/renderer/app.js`, rendered in `qa/multi-window-artifacts/vue-renderer-local-history.png`
-- Problem: the surface describes itself as read-only and ends at preview, while the user guide and product positioning say a local Codex or Claude conversation can be copied into Synclattice for cross-model continuation. There is no visible copy command or import state in the preview.
+- Problem: the surface describes itself as read-only and ends at preview, while the user guide and product positioning say a local Codex or Claude conversation can be copied into ChatSwitch for cross-model continuation. There is no visible copy command or import state in the preview.
 - Design evidence: `docs/USER_GUIDE.zh-CN.md` section 11 explicitly instructs users to copy/import a selected local conversation; `src/renderer/index.html` currently says messages only display in the preview and `renderLocalHistoryPreview` creates only metadata and messages. The rendered three-pane browser leaves the preview heading as metadata-only even though this is the point where the selected source and target action are known.
 - Owner: `src/renderer/index.html`, `src/renderer/app.js`, and the local-history rules in `src/renderer/styles.css`
 - Scope and affected surfaces: local history dialog at desktop and compact widths, selected-conversation preview, import progress/success/error states, and the main conversation list after import
@@ -13,7 +13,7 @@ Written against: 84e10832b19584d76a77ab52685085622e6e4d2b
 
 ## Design decision
 
-Turn the existing three-pane browser into a source-to-Synclattice workflow without weakening its read-only boundary. Keep source navigation and preview unchanged, then place one compact primary command in the selected preview heading: “复制到 Synclattice”. Pair it with an inline status region that explains the private-copy result. The copy command must never imply that the source file is moved or synchronized, and duplicate imports must resolve to the existing Synclattice copy.
+Turn the existing three-pane browser into a source-to-ChatSwitch workflow without weakening its read-only boundary. Keep source navigation and preview unchanged, then place one compact primary command in the selected preview heading: “复制到 ChatSwitch”. Pair it with an inline status region that explains the private-copy result. The copy command must never imply that the source file is moved or synchronized, and duplicate imports must resolve to the existing ChatSwitch copy.
 
 ## Reuse
 
@@ -26,7 +26,7 @@ No new interactive primitive is required. The existing native command and inline
 ## Changes
 
 1. `src/renderer/app.js`
-   - Change: add the selected-conversation copy command and inline progress/result state to the preview heading; after a successful copy, refresh the Synclattice conversation list and open the copied thread when a provider is connected.
+   - Change: add the selected-conversation copy command and inline progress/result state to the preview heading; after a successful copy, refresh the ChatSwitch conversation list and open the copied thread when a provider is connected.
    - Preserve: source browsing, search, preview parsing, source-file immutability, current dialog close behavior, and all existing conversation/model actions.
    - Verify: the command is available only for a loaded conversation, disables while running, reports errors beside the command, and repeated copy opens the existing copy instead of creating duplicates.
 
@@ -48,7 +48,7 @@ No new interactive primitive is required. The existing native command and inline
 
 ## Validation
 
-- Product: select a fixture Codex/Claude conversation, copy it into an isolated Synclattice profile, verify its messages and reasoning summary, repeat the action, then continue through another provider branch.
+- Product: select a fixture Codex/Claude conversation, copy it into an isolated ChatSwitch profile, verify its messages and reasoning summary, repeat the action, then continue through another provider branch.
 - Interface: inspect the local-history dialog at desktop and compact widths with a long title/path and confirm command/status visibility, focus, contrast, truncation, and no overlap.
 - System: confirm the action reuses the existing primary command and inline status patterns and does not add a second dialog or card system.
 - Repository: `npm run build:renderer && npm run check && npm run test:unit && npm run test:vue-ui` -> generated renderer is current and all isolated tests pass.

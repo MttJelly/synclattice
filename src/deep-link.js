@@ -99,12 +99,12 @@ function parseImportLink(url) {
   };
 }
 
-function parseSynclatticeLink(input) {
+function parseChatSwitchLink(input) {
   const raw = String(input || "").trim();
   if (!raw || raw.length > 16384) return null;
   let url;
   try { url = new URL(raw); } catch { return null; }
-  if (url.protocol !== "synclattice:" || !VALID_HOSTS.has(url.hostname) || url.username || url.password) return null;
+  if (url.protocol !== "chatswitch:" || !VALID_HOSTS.has(url.hostname) || url.username || url.password) return null;
   const action = url.hostname;
   if (action === "import") return parseImportLink(url);
   if (action === "extensions") {
@@ -121,9 +121,9 @@ function parseSynclatticeLink(input) {
   };
 }
 
-function synclatticeLinkFromArgs(args = []) {
+function chatSwitchLinkFromArgs(args = []) {
   return (args || []).map((value) => String(value || ""))
-    .find((value) => value.startsWith("synclattice://")) || null;
+    .find((value) => value.startsWith("chatswitch://")) || null;
 }
 
-module.exports = { parseSynclatticeLink, synclatticeLinkFromArgs };
+module.exports = { parseChatSwitchLink, chatSwitchLinkFromArgs };

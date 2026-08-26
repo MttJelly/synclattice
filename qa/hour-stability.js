@@ -6,11 +6,11 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const root = path.resolve(__dirname, "..");
 const artifactRoot = path.join(__dirname, "multi-window-artifacts");
 const profileRoot = path.join(__dirname, ".hour-stability-profile");
-const durationMs = Number(process.env.SHARE_MASTER_SOAK_MS || 3_600_000);
-const cycleMs = Math.max(250, Number(process.env.SHARE_MASTER_SOAK_CYCLE_MS || 2_000));
+const durationMs = Number(process.env.CHATSWITCH_SOAK_MS || 3_600_000);
+const cycleMs = Math.max(250, Number(process.env.CHATSWITCH_SOAK_CYCLE_MS || 2_000));
 
 if (!Number.isFinite(durationMs) || durationMs < 10_000) {
-  throw new Error("SHARE_MASTER_SOAK_MS must be at least 10000.");
+  throw new Error("CHATSWITCH_SOAK_MS must be at least 10000.");
 }
 
 app.setPath("userData", profileRoot);
@@ -118,7 +118,7 @@ async function initializeRenderer(window) {
   await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const started = Date.now();
     const timer = setInterval(() => {
-      if (window.shareMasterVue && window.shareMasterState) {
+      if (window.chatSwitchVue && window.chatSwitchState) {
         clearInterval(timer);
         resolve();
       } else if (Date.now() - started > 10000) {

@@ -62,14 +62,14 @@ function approvalNotificationSpec(request = {}) {
   const method = String(request.method || "");
   if (method === "item/tool/requestUserInput") {
     return {
-      title: "Synclattice 需要你的选择",
+      title: "ChatSwitch 需要你的选择",
       body: "模型正在等待你填写信息。点击通知返回对应会话。",
       actions: [],
     };
   }
   if (method === "mcpServer/elicitation/request") {
     return {
-      title: "Synclattice 需要你的输入",
+      title: "ChatSwitch 需要你的输入",
       body: "MCP 服务正在等待你的确认或输入。点击通知返回对应会话。",
       actions: [],
     };
@@ -83,7 +83,7 @@ function approvalNotificationSpec(request = {}) {
     operation = labels.length ? `使用${labels.join("和")}` : "提升访问权限";
   }
   return {
-    title: "Synclattice 请求授权",
+    title: "ChatSwitch 请求授权",
     body: `模型请求${operation}。可直接处理，或点击通知查看完整详情。`,
     actions: DIRECT_APPROVAL_METHODS.has(method)
       ? NOTIFICATION_APPROVAL_ACTIONS.map(({ type, text }) => ({ type, text }))

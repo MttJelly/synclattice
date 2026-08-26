@@ -149,8 +149,12 @@ async function main() {
     if (applied.approvalsReviewer !== "auto_review") {
       throw new Error(`Unexpected approvals reviewer: ${applied.approvalsReviewer}`);
     }
-    if (applied.sandboxPolicy?.type !== "workspaceWrite") {
-      throw new Error(`Unexpected sandbox policy: ${JSON.stringify(applied.sandboxPolicy)}`);
+    const sandboxPolicy = applied.sandboxPolicy;
+    const workspaceWrite = sandboxPolicy?.type === "workspaceWrite";
+    const runtimeReadOnly = sandboxPolicy?.type === "readOnly"
+      && sandboxPolicy.networkAccess === false;
+    if (!workspaceWrite && !runtimeReadOnly) {
+      throw new Error(`Unexpected sandbox policy: ${JSON.stringify(sandboxPolicy)}`);
     }
     confirmedSettings = applied;
     firstResponse = observed.agentText.trim();
@@ -215,6 +219,7 @@ async function main() {
     appliedModel: confirmedSettings?.model || null,
     appliedEffort: confirmedSettings?.effort || null,
     appliedApprovalsReviewer: confirmedSettings?.approvalsReviewer || null,
+    sandboxPolicy: confirmedSettings?.sandboxPolicy || null,
     reroutes: observed.reroutes,
     interrupt: "interrupted",
     requestUserInput: observed.userInputRequests,

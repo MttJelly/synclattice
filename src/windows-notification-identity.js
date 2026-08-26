@@ -20,7 +20,7 @@ function windowsTaskbarDetails(options = {}) {
     appIconPath: options.icon || target,
     appIconIndex: 0,
     relaunchCommand: `${quoteWindowsArgument(target)}${args ? ` ${args}` : ""}`,
-    relaunchDisplayName: "Synclattice",
+    relaunchDisplayName: "ChatSwitch",
   };
 }
 
@@ -38,9 +38,10 @@ function ensureWindowsNotificationIdentity(options = {}) {
   }
 
   const programsDirectory = path.join(options.appData, ...START_MENU_PARTS);
-  const shortcutPath = path.join(programsDirectory, "Synclattice.lnk");
+  const shortcutPath = path.join(programsDirectory, "ChatSwitch.lnk");
   const legacyShortcutPaths = [
     path.join(programsDirectory, "ThreadLattice.lnk"),
+    path.join(programsDirectory, "Synclattice.lnk"),
     path.join(programsDirectory, "Share Master.lnk"),
     path.join(programsDirectory, "Electron.lnk"),
   ];
@@ -50,7 +51,7 @@ function ensureWindowsNotificationIdentity(options = {}) {
     target: options.target,
     args: options.args || "",
     cwd: options.cwd || path.dirname(options.target),
-    description: "Synclattice",
+    description: "ChatSwitch",
     icon: options.icon || options.target,
     iconIndex: 0,
     appUserModelId: options.appUserModelId,
@@ -58,7 +59,7 @@ function ensureWindowsNotificationIdentity(options = {}) {
   };
   const operation = fsApi.existsSync(shortcutPath) ? "replace" : "create";
   if (!shellApi.writeShortcutLink(shortcutPath, operation, shortcut)) {
-    throw new Error("Unable to register the Synclattice notification shortcut.");
+    throw new Error("Unable to register the ChatSwitch notification shortcut.");
   }
 
   let removedLegacy = false;
@@ -67,6 +68,8 @@ function ensureWindowsNotificationIdentity(options = {}) {
     try {
       const legacy = shellApi.readShortcutLink(legacyShortcutPath);
       const oldProductAppId = new Set([
+        "com.synclattice.desktop",
+        "com.synclattice.desktop.dev",
         "com.sharemaster.desktop",
         "com.sharemaster.desktop.dev",
         "com.threadlattice.desktop",

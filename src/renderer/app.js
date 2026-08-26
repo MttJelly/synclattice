@@ -1,8 +1,8 @@
-/* global lucide, marked, DOMPurify, SynclatticeVueRuntime */
+/* global lucide, marked, DOMPurify, ChatSwitchVueRuntime */
 
-const api = window.codexDeck;
-const confirmationUi = SynclatticeVueRuntime.confirmationUi;
-const state = SynclatticeVueRuntime.shallowReactive({
+const api = window.chatSwitch;
+const confirmationUi = ChatSwitchVueRuntime.confirmationUi;
+const state = ChatSwitchVueRuntime.shallowReactive({
   provider: null,
   providerType: null,
   providerEngine: null,
@@ -14,8 +14,8 @@ const state = SynclatticeVueRuntime.shallowReactive({
   managedSkills: [],
   promptTemplates: [],
   mcpServers: [],
-  theme: ["system", "light", "dark"].includes(localStorage.getItem("synclattice-theme"))
-    ? localStorage.getItem("synclattice-theme")
+  theme: ["system", "light", "dark"].includes(localStorage.getItem("chatswitch-theme"))
+    ? localStorage.getItem("chatswitch-theme")
     : "system",
   extensionTab: "skills",
   editingPromptId: null,
@@ -25,6 +25,7 @@ const state = SynclatticeVueRuntime.shallowReactive({
   skillQueryStart: null,
   threadSettings: {},
   threadAliases: {},
+  threadDecorations: {},
   account: null,
   rateLimits: null,
   accountUsage: null,
@@ -78,6 +79,7 @@ const state = SynclatticeVueRuntime.shallowReactive({
   threadSearchQuery: "",
   submitting: false,
   pendingAttachments: [],
+  webSearchEnabled: false,
   workspace: "",
   running: false,
   streamNodes: new Map(),
@@ -116,6 +118,7 @@ const state = SynclatticeVueRuntime.shallowReactive({
   localHistorySelectedId: null,
   localHistorySelectedConversation: null,
   localHistoryLoading: false,
+  localHistoryBulkLoading: false,
   localHistoryGeneration: 0,
   localProviderCandidates: [],
   selectedLocalProviderIds: new Set(),
@@ -125,7 +128,7 @@ const state = SynclatticeVueRuntime.shallowReactive({
   reconnectTimer: null,
   reconnecting: false,
 });
-window.shareMasterState = state;
+window.chatSwitchState = state;
 
 const INITIAL_VISIBLE_TURNS = 40;
 const EARLIER_TURN_BATCH = 40;
@@ -166,6 +169,13 @@ const elements = {
   localHistoryOverlay: $("#local-history-overlay"), localHistorySources: $("#local-history-sources"),
   localHistoryList: $("#local-history-list"), localHistoryPreview: $("#local-history-preview"),
   localHistorySearch: $("#local-history-search"), localHistorySummary: $("#local-history-summary"),
+  localHistoryImportAll: $("#local-history-import-all-button"),
+  filePreviewOverlay: $("#file-preview-overlay"), filePreviewTitle: $("#file-preview-title"),
+  filePreviewMeta: $("#file-preview-meta"), filePreviewStatus: $("#file-preview-status"),
+  filePreviewPdf: $("#file-preview-pdf"), filePreviewDocument: $("#file-preview-document"),
+  filePreviewText: $("#file-preview-text"), filePreviewError: $("#file-preview-error"),
+  filePreviewOpenSystem: $("#file-preview-open-system"), filePreviewDone: $("#file-preview-done-button"),
+  filePreviewClose: $("#file-preview-close-button"),
   localProviderOverlay: $("#local-provider-overlay"), localProviderList: $("#local-provider-list"),
   localProviderSummary: $("#local-provider-summary"), localProviderStatus: $("#local-provider-status"),
   localProviderImportButton: $("#local-provider-import-button"),
@@ -193,6 +203,7 @@ const elements = {
   taskModelInput: $("#task-model-input"), taskApprovalSelect: $("#task-approval-select"),
   taskNotifyInput: $("#task-notify-input"), taskRetryInput: $("#task-retry-input"),
   sessionModel: $("#session-model"), sessionEffort: $("#session-effort"),
+  webSearchInput: $("#web-search-input"),
   appliedSettings: $("#applied-settings"), modeBadge: $("#mode-badge"),
   approvalModeMenu: $("#approval-mode-menu"), approvalModeLabel: $("#approval-mode-label"),
   confirmationOverlay: $("#confirmation-overlay"), confirmationCancel: $("#confirmation-cancel"),
@@ -230,6 +241,158 @@ const renderMarkdown = (text) => {
   return rendered;
 };
 const refreshIcons = () => lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
+const OPENABLE_DOCUMENT_PATTERN = /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|zip)$/i;
+
+function localDocumentPath(value) {
+  let raw = String(value || "").trim().replace(/^<|>$/g, "");
+  if (/^file:\/\//i.test(raw)) {
+    try { raw = decodeURIComponent(new URL(raw).pathname).replace(/^\/(?:[A-Za-z]:)/, (match) => match.slice(1)); } catch { return null; }
+  }
+  if (/^sandbox:/i.test(raw)) raw = raw.replace(/^sandbox:/i, "");
+  if (!OPENABLE_DOCUMENT_PATTERN.test(raw)) return null;
+  return /^[A-Za-z]:[\\/]/.test(raw) || /^\\\\/.test(raw) || raw.startsWith("/") ? raw : null;
+}
+
+let filePreviewLastTrigger = null;
+let filePreviewPath = null;
+
+function previewFileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function resetFilePreviewContent() {
+  elements.filePreviewPdf.classList.add("hidden");
+  elements.filePreviewDocument.classList.add("hidden");
+  elements.filePreviewText.classList.add("hidden");
+  elements.filePreviewPdf.src = "about:blank";
+  elements.filePreviewDocument.replaceChildren();
+  elements.filePreviewText.textContent = "";
+}
+
+function closeFilePreview() {
+  elements.filePreviewOverlay.classList.add("hidden");
+  resetFilePreviewContent();
+  elements.filePreviewError.textContent = "";
+  filePreviewPath = null;
+  const trigger = filePreviewLastTrigger;
+  filePreviewLastTrigger = null;
+  if (trigger?.isConnected) trigger.focus();
+}
+
+function renderFilePreview(result) {
+  const extension = String(result.extension || "").replace(/^\./, "").toUpperCase() || "文件";
+  elements.filePreviewTitle.textContent = result.fileName || "文件预览";
+  elements.filePreviewTitle.title = result.filePath || result.fileName || "";
+  elements.filePreviewMeta.textContent = `${extension} · ${previewFileSize(result.size)} · 只读预览`;
+  elements.filePreviewStatus.textContent = "";
+  elements.filePreviewError.textContent = "";
+  resetFilePreviewContent();
+  if (result.kind === "pdf") {
+    elements.filePreviewPdf.src = result.url;
+    elements.filePreviewPdf.classList.remove("hidden");
+  } else if (result.kind === "markdown") {
+    elements.filePreviewDocument.innerHTML = renderMarkdown(result.content || "");
+    enhanceFileLinks(elements.filePreviewDocument);
+    elements.filePreviewDocument.classList.remove("hidden");
+  } else if (result.kind === "text" || result.kind === "office-text") {
+    elements.filePreviewText.textContent = result.content || "文件中没有可显示的文本。";
+    elements.filePreviewText.classList.remove("hidden");
+    if (result.kind === "office-text") elements.filePreviewStatus.textContent = "已提取可读文本；原始排版、表格和图片可能与 Office 中不同。";
+  } else if (result.kind === "archive") {
+    const entries = Array.isArray(result.entries) && result.entries.length ? result.entries : ["无法读取压缩包目录。"];
+    elements.filePreviewText.textContent = `${entries.join("\n")}${result.truncated ? "\n… 还有更多文件" : ""}`;
+    elements.filePreviewText.classList.remove("hidden");
+    elements.filePreviewStatus.textContent = "压缩包仅显示文件列表，不会在应用内执行其中的文件。";
+  } else {
+    elements.filePreviewDocument.innerHTML = `<div class="file-preview-unsupported"><span data-lucide="file-warning"></span><strong>此 Office 文件暂不支持原生排版预览</strong><p>可以在应用内查看文件信息，也可以使用系统程序打开完整内容。</p></div>`;
+    elements.filePreviewDocument.classList.remove("hidden");
+    refreshIcons();
+  }
+}
+
+async function openFilePreview(filePath, trigger = null) {
+  filePreviewLastTrigger = trigger;
+  filePreviewPath = filePath;
+  elements.filePreviewOverlay.classList.remove("hidden");
+  elements.filePreviewTitle.textContent = "文件预览";
+  elements.filePreviewTitle.title = String(filePath || "");
+  elements.filePreviewMeta.textContent = "正在读取文件…";
+  elements.filePreviewStatus.textContent = "正在读取文件…";
+  elements.filePreviewError.textContent = "";
+  resetFilePreviewContent();
+  elements.filePreviewClose.focus();
+  try {
+    const result = await api.previewFile(filePath);
+    if (elements.filePreviewOverlay.classList.contains("hidden")) return;
+    renderFilePreview(result);
+  } catch (error) {
+    elements.filePreviewStatus.textContent = "无法预览此文件";
+    elements.filePreviewError.textContent = error.message || "读取文件失败。";
+    elements.filePreviewDocument.innerHTML = `<div class="file-preview-unsupported"><span data-lucide="circle-alert"></span><strong>文件读取失败</strong><p>请确认文件仍存在，或使用系统程序打开。</p></div>`;
+    elements.filePreviewDocument.classList.remove("hidden");
+    refreshIcons();
+  }
+}
+
+function fileOpenButton(filePath, label = "打开文件") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "message-file-link";
+  button.title = filePath;
+  button.setAttribute("aria-label", `${label}：${filePath}`);
+  button.innerHTML = '<span data-lucide="file-text"></span><span></span>';
+  button.lastElementChild.textContent = label;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await openFilePreview(filePath, button);
+    } catch (error) {
+      showDiagnostic(`预览文件失败：${error.message}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
+function enhanceFileLinks(container) {
+  if (!container) return;
+  container.querySelectorAll("a[href]").forEach((anchor) => {
+    const filePath = localDocumentPath(anchor.getAttribute("href"));
+    if (!filePath) return;
+    const button = fileOpenButton(filePath, anchor.textContent.trim() || `打开 ${filePath.split(/[\\/]/).pop()}`);
+    anchor.replaceWith(button);
+  });
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.parentElement?.closest("pre,code,a,button")) continue;
+    if (/[A-Za-z]:[\\/][^\s<>"'`]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|zip)/i.test(node.nodeValue || "")) nodes.push(node);
+  }
+  for (const node of nodes) {
+    const source = node.nodeValue || "";
+    const pattern = /([A-Za-z]:[\\/][^\s<>"'`]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json|zip))/ig;
+    let cursor = 0;
+    const fragment = document.createDocumentFragment();
+    let match;
+    while ((match = pattern.exec(source))) {
+      const filePath = localDocumentPath(match[1].replace(/[.,;:)]+$/, ""));
+      if (!filePath) continue;
+      fragment.append(document.createTextNode(source.slice(cursor, match.index)));
+      fragment.append(fileOpenButton(filePath, `打开 ${filePath.split(/[\\/]/).pop()}`));
+      cursor = match.index + match[1].length;
+    }
+    if (cursor) {
+      fragment.append(document.createTextNode(source.slice(cursor)));
+      node.replaceWith(fragment);
+    }
+  }
+  refreshIcons();
+}
 
 function applyTheme(theme, persist = true) {
   const preference = ["system", "light", "dark"].includes(theme) ? theme : "system";
@@ -239,8 +402,8 @@ function applyTheme(theme, persist = true) {
   state.theme = preference;
   document.documentElement.dataset.theme = resolved;
   document.documentElement.style.colorScheme = resolved;
-  window.codexDeck.setWindowTheme(resolved);
-  if (persist) localStorage.setItem("synclattice-theme", preference);
+  window.chatSwitch.setWindowTheme(resolved);
+  if (persist) localStorage.setItem("chatswitch-theme", preference);
   const labels = { system: "跟随系统", light: "浅色", dark: "深色" };
   const icons = { system: "monitor", light: "sun", dark: "moon" };
   const button = $("#theme-button");
@@ -260,6 +423,21 @@ const threadBelongsToProject = (thread, project) => {
   return Boolean(project?.root && samePath(thread.cwd, project.root));
 };
 const brandIconPath = (brand) => `../../node_modules/simple-icons/icons/${brand === "claude" ? "claude" : "openai"}.svg`;
+const MASKED_API_KEY = "********";
+
+function displayedApiKeyValue(input) {
+  return input?.dataset.maskedCredential === "true" && input.value === MASKED_API_KEY
+    ? ""
+    : String(input?.value || "").trim();
+}
+
+function applyApiKeyDisplay(input, hasStoredKey) {
+  input.value = hasStoredKey ? MASKED_API_KEY : "";
+  input.dataset.maskedCredential = String(Boolean(hasStoredKey));
+  input.required = !hasStoredKey;
+  input.placeholder = hasStoredKey ? "已加密保存在本机" : "请输入 API Key";
+  input.setAttribute("aria-invalid", "false");
+}
 const effortLabels = {
   low: "轻",
   medium: "中",
@@ -334,10 +512,11 @@ function renderAccountPanel() {
   const context = `<div class="connection-context"><span class="connection-context-label">当前连接</span><strong>${escapeHtml(selectedLabel)}</strong><span class="connection-context-state ${state.connected ? "connected" : state.connectingProvider ? "pending" : "idle"}">${state.connected ? "已连接" : state.connectingProvider ? "连接中" : "未连接"}</span></div>`;
   elements.accountPanel.classList.toggle("hidden", !selectedProvider && !isOfficial && !isRelay);
   const loginButton = $("#official-login-button");
-  loginButton.classList.toggle("hidden", isRelay);
+  loginButton.classList.toggle("hidden", !isOfficial);
   const runtimeUnavailable = isOfficial && !state.openaiRuntimeAvailable;
   loginButton.disabled = runtimeUnavailable;
-  loginButton.title = runtimeUnavailable ? "未检测到 Codex CLI 或官方 ChatGPT 应用" : "打开官方 ChatGPT 登录页面";
+  loginButton.title = runtimeUnavailable ? "未检测到 Codex CLI 或官方 ChatGPT 应用" : "打开 OpenAI 官方 ChatGPT 登录页面（Codex）";
+  if (!isOfficial && !isRelay) elements.accountPanel.classList.add("hidden");
   if (isRelay) {
     if (state.relayBalanceLoading) {
       elements.accountPanel.innerHTML = `${context}<div class="account-empty"><strong>正在查询中转余额</strong><span>正在连接当前中转的余额接口...</span></div>`;
@@ -376,10 +555,10 @@ function renderAccountPanel() {
   const account = state.account;
   const groups = Array.isArray(state.rateLimits?.groups) ? state.rateLimits.groups : [];
   loginButton.classList.remove("hidden");
-  loginButton.innerHTML = `<span data-lucide="log-in"></span>${account ? "切换或重新登录" : "登录当前官方账号"}`;
+  loginButton.innerHTML = `<span data-lucide="log-in"></span>${account ? "切换或重新登录 ChatGPT" : "登录 ChatGPT 官方（Codex）"}`;
   if (!account) {
     const message = runtimeUnavailable
-      ? "未检测到 Codex CLI 或官方 ChatGPT 应用。Synclattice 仍可使用其他 API、中转连接和本地记录。"
+      ? "未检测到 Codex CLI 或官方 ChatGPT 应用。ChatSwitch 仍可使用其他 API、中转连接和本地记录。"
       : `登录 ${escapeHtml(selectedLabel)} 后可查看账号、套餐和 Codex 额度。`;
     elements.accountPanel.innerHTML = `${context}<div class="account-empty"><strong>${runtimeUnavailable ? "OpenAI 官方连接不可用" : "尚未登录"}</strong><span>${message}</span></div>`;
     refreshIcons();
@@ -700,7 +879,9 @@ function setConnected(connected, label = "") {
   if (label) elements.providerName.textContent = label;
   elements.sessionModel.disabled = !connected;
   elements.sessionEffort.disabled = !connected;
+  elements.webSearchInput.disabled = !connected;
   syncComposerState();
+  if (!connected) loadThreads().catch((error) => showDiagnostic(`本地会话读取失败：${error.message}`, true));
 }
 
 function clearReconnectTimer(resetAttempt = false) {
@@ -722,7 +903,7 @@ function connect(provider, closeOverlay = true, reconnecting = false) {
   const generation = ++state.connectionGeneration;
   const requestedProvider = state.providers.find((item) => item.id === provider);
   if (["official", "account"].includes(requestedProvider?.type) && !state.openaiRuntimeAvailable) {
-    const message = "未检测到 Synclattice 内置或外部 OpenAI 运行时。仍可使用其他 API、中转连接和本地记录。";
+    const message = "未检测到 ChatSwitch 内置或外部 OpenAI 运行时。仍可使用其他 API、中转连接和本地记录。";
     elements.providerError.textContent = message;
     showDiagnostic(message, true);
     renderAccountPanel();
@@ -771,8 +952,8 @@ function connect(provider, closeOverlay = true, reconnecting = false) {
       elements.composerBrandIcon.alt = visual.label;
       if (closeOverlay) elements.overlay.classList.add("hidden");
       elements.providerError.textContent = "";
-      if (result.runtimeKind === "synclattice-bundled") {
-        showDiagnostic("已使用 Synclattice 内置 OpenAI 运行时，不依赖外部 CLI 或 ChatGPT 应用。", false);
+      if (result.runtimeKind === "chatswitch-bundled") {
+        showDiagnostic("已使用 ChatSwitch 内置 OpenAI 运行时，不依赖外部 CLI 或 ChatGPT 应用。", false);
       } else if (result.runtimeKind === "chatgpt-app") {
         showDiagnostic("已使用 ChatGPT 应用内置运行时，无需单独安装 Codex CLI。", false);
       }
@@ -868,17 +1049,22 @@ function handleConnectionDisconnect(payload = {}) {
 }
 
 async function loadThreads() {
-  if (!state.connected) return;
   const generation = ++state.loadGeneration;
   const connectionGeneration = state.connectionGeneration;
   try {
-    const [active, archived] = await Promise.all([
-      api.listThreads({ search: "", archived: false }),
-      api.listThreads({ search: "", archived: true }),
-    ]);
+    const [active, archived] = state.connected
+      ? await Promise.all([
+        api.listThreads({ search: "", archived: false }),
+        api.listThreads({ search: "", archived: true }),
+      ])
+      : [await api.listLocalThreads({ search: "" }), { data: [] }];
     if (generation !== state.loadGeneration || connectionGeneration !== state.connectionGeneration) return;
     state.activeThreads = active.data || [];
     state.archivedThreads = (archived.data || []).map((thread) => ({ ...thread, _archived: true }));
+    if (!state.connected && state.activeThreads.length) {
+      elements.providerState.textContent = `已导入 ${state.activeThreads.length} 条，可离线查看`;
+    }
+    $("#close-provider-button").classList.toggle("hidden", !state.connected && !state.activeThreads.length);
     state.allThreads = threadsForCurrentView();
     updateThreadViewControls();
     syncProjects();
@@ -1084,8 +1270,8 @@ function renderManagedSkills(query = "") {
   for (const skill of matches) {
     const row = document.createElement("div");
     row.className = `extension-row${skill.enabled ? "" : " disabled"}`;
-    const source = String(skill.source || "Synclattice 私有目录");
-    row.innerHTML = `<span class="extension-row-icon"><span data-lucide="wand-sparkles"></span></span><span class="extension-copy"><strong><code>/${escapeHtml(skill.name)}</code></strong><span title="${escapeHtml(`${skill.description || "Synclattice Skill"}\n来源：${source}\n私有副本：${skill.path || ""}`)}">${escapeHtml(skill.description || "Synclattice Skill")} · ${escapeHtml(source.split(/[\\/]/).filter(Boolean).slice(-2).join(" / "))}</span></span>`;
+    const source = String(skill.source || "ChatSwitch 私有目录");
+    row.innerHTML = `<span class="extension-row-icon"><span data-lucide="wand-sparkles"></span></span><span class="extension-copy"><strong><code>/${escapeHtml(skill.name)}</code></strong><span title="${escapeHtml(`${skill.description || "ChatSwitch Skill"}\n来源：${source}\n私有副本：${skill.path || ""}`)}">${escapeHtml(skill.description || "ChatSwitch Skill")} · ${escapeHtml(source.split(/[\\/]/).filter(Boolean).slice(-2).join(" / "))}</span></span>`;
     const toggle = document.createElement("label");
     toggle.className = "extension-toggle";
     toggle.innerHTML = `<span>${skill.enabled ? "已启用" : "已停用"}</span>`;
@@ -1122,7 +1308,7 @@ function renderManagedSkills(query = "") {
         const confirmed = await confirmAction({
           eyebrow: "扩展管理",
           title: `卸载 Skill“${skill.name}”？`,
-          description: "只删除 Synclattice 私有安装副本。",
+          description: "只删除 ChatSwitch 私有安装副本。",
           detail: "其他位置的 Skill 源文件和原始配置不会被修改。",
           confirmLabel: "卸载 Skill",
         });
@@ -1486,6 +1672,13 @@ function applyThreadFilter(search = elements.search.value.trim()) {
     return [titleOf(thread), thread.cwd, thread.modelProvider].some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(query))
       || state.threadSearchHits.has(thread.id);
   });
+  state.threads.sort((left, right) => {
+    const a = state.threadDecorations[left.id] || {};
+    const b = state.threadDecorations[right.id] || {};
+    return Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+      || Number(Boolean(b.favorite)) - Number(Boolean(a.favorite))
+      || Number(right.recencyAt || right.updatedAt) - Number(left.recencyAt || left.updatedAt);
+  });
   renderThreadList();
 }
 
@@ -1653,7 +1846,8 @@ function renderThreadList() {
   const fragment = document.createDocumentFragment();
   for (const thread of state.threads) {
     const item = document.createElement("button");
-    item.className = `thread-item ${state.activeThread?.id === thread.id ? "active" : ""}`;
+    const decoration = state.threadDecorations[thread.id] || {};
+    item.className = `thread-item ${state.activeThread?.id === thread.id ? "active" : ""} ${decoration.pinned ? "pinned" : ""} ${decoration.favorite ? "favorite" : ""}`;
     item.dataset.threadId = thread.id;
     const savedModel = state.threadSettings[threadSettingsKey(thread.id)]?.model;
     const deletion = pendingDeletion(thread.id);
@@ -1664,14 +1858,17 @@ function renderThreadList() {
     const detail = searchSnippet
       ? searchSnippet
       : deletion
-      ? `${deletionMinutes} 分钟后从 Synclattice 清除`
+      ? `${deletionMinutes} 分钟后从 ChatSwitch 清除`
       : run ? `正在思考${queueLength ? ` · ${queueLength} 条排队` : ""}`
       : queueLength ? `${queueLength} 条待发送 · 点击会话后继续`
       : thread._syncedFromCodex ? `已同步的 Codex 会话 · ${timeAgo(thread.recencyAt || thread.updatedAt)}`
       : `${savedModel || thread.model || thread.modelProvider || "会话"} · ${timeAgo(thread.recencyAt || thread.updatedAt)}`;
     item.classList.toggle("pending-delete", Boolean(deletion));
     item.classList.toggle("thread-running", Boolean(run));
-    item.innerHTML = `<span class="thread-copy"><strong>${escapeHtml(titleOf(thread))}</strong><small>${escapeHtml(detail)}</small></span><span class="thread-more" title="会话操作"><span data-lucide="ellipsis"></span></span>`;
+    const tags = Array.isArray(decoration.tags) && decoration.tags.length
+      ? `<span class="thread-tags">${decoration.tags.slice(0, 3).map((tag) => `<em>${escapeHtml(tag)}</em>`).join("")}</span>`
+      : "";
+    item.innerHTML = `<span class="thread-copy"><strong>${decoration.pinned ? '<span class="thread-flag" title="已置顶">📌</span>' : ""}${decoration.favorite ? '<span class="thread-flag" title="已收藏">★</span>' : ""}${escapeHtml(titleOf(thread))}</strong><small>${escapeHtml(detail)}${tags}</small></span><span class="thread-more" title="会话操作"><span data-lucide="ellipsis"></span></span>`;
     item.addEventListener("click", (event) => {
       if (event.target.closest(".thread-more")) return openThreadMenu(thread, event);
       openThread(state.threadView === "removed" ? { ...thread, _removed: true } : thread);
@@ -1758,7 +1955,8 @@ function renderScheduledTasks() {
 }
 
 function providerGroup(provider) {
-  if (["official", "account"].includes(provider.type)) return { rank: 0, label: "OpenAI 账号" };
+  if (["official", "account"].includes(provider.type)) return { rank: 0, label: "ChatGPT / Codex 账号" };
+  if (provider.type === "claude" || provider.engine === "claude") return { rank: 1, label: "Claude Code" };
   if (provider.protocol === "chat_completions") return { rank: 2, label: "Chat Completions 模型" };
   return { rank: 1, label: "Codex 与编程代理" };
 }
@@ -1791,7 +1989,7 @@ function renderProviderOptions() {
   if (!hasConfiguredConnection) {
     const empty = document.createElement("div");
     empty.className = "provider-empty-state";
-    empty.innerHTML = '<span data-lucide="plug-zap"></span><strong>尚未添加其他连接</strong><small>新安装的 Synclattice 不会自动导入账号或 API Key。点击“登录默认官方账号”或“添加连接”开始使用。</small>';
+    empty.innerHTML = '<span data-lucide="plug-zap"></span><strong>尚未添加其他连接</strong><small>新安装的 ChatSwitch 不会自动导入账号或 API Key。点击“登录 ChatGPT 官方（Codex）”、“登录 Claude Code 官方”或“添加连接”开始使用。</small>';
     container.appendChild(empty);
   }
   let previousGroup = null;
@@ -1867,10 +2065,10 @@ function renderProviderOptions() {
         : provider.id === "niubi"
           ? `OpenAI · ${provider.model} · ${configuredKey || "首次连接时配置 API Key"}`
           : provider.id === "hexuan"
-            ? `OpenAI · ${provider.model} · ${configuredKey || "使用现有 HEXUAN_API_KEY"}`
+            ? `OpenAI · ${provider.model} · ${configuredKey || "需要配置 API Key"}`
             : provider.id === "claude"
-              ? `Claude · ${provider.model || "未选择模型"} · ${configuredKey || "需要配置 Token"}`
-              : unavailable ? "OpenAI · 未检测到 Synclattice 内置或外部运行时"
+              ? `Claude · ${provider.model || "未选择模型"} · ${provider.authMode === "oauth" ? "Anthropic 官方登录" : configuredKey || "需要配置 Token"}`
+              : unavailable ? "OpenAI · 未检测到 ChatSwitch 内置或外部运行时"
                 : "OpenAI · 使用 Codex 官方登录状态";
     const healthLabel = health?.openUntil > Date.now()
       ? `冷却中 · ${Math.max(1, Math.ceil((health.openUntil - Date.now()) / 1000))} 秒`
@@ -1880,11 +2078,11 @@ function renderProviderOptions() {
             : route?.enabled ? `自动切换 · ${route.fallbackProviderIds?.length || 0} 个备用` : null;
     const detail = [baseDetail, healthLabel].filter(Boolean).join(" · ");
     option.innerHTML = `<span class="provider-icon ${visual.className}" aria-label="${escapeHtml(visual.label)}">${visual.markup}</span><span><strong>${escapeHtml(provider.connectionLabel || provider.label)}</strong><small>${escapeHtml(detail)}</small></span>`;
-    option.title = unavailable ? "安装新版 Synclattice 内置运行时，或安装 Codex CLI 后使用 OpenAI 官方连接" : "连接";
+    option.title = unavailable ? "安装新版 ChatSwitch 内置运行时，或安装 Codex CLI 后使用 OpenAI 官方连接" : "连接";
     option.addEventListener("click", () => {
       if (unavailable) return;
-      if (provider.type === "relay" && !provider.hasStoredKey) openRelayDialog(provider);
-      else if (provider.id === "claude" && !provider.hasStoredKey) openClaudeDialog(provider);
+      if ((provider.type === "relay" || ["niubi", "hexuan"].includes(provider.id)) && !provider.hasStoredKey) openRelayDialog(provider);
+      else if (provider.id === "claude" && !provider.hasStoredKey && provider.authMode !== "oauth") openClaudeDialog(provider);
       else connect(provider.id);
     });
     const actions = document.createElement("div");
@@ -1898,16 +2096,20 @@ function renderProviderOptions() {
     }
     actions.appendChild(trailing);
     row.append(drag, option, actions);
-    if (provider.id === "claude" || provider.type === "relay") {
+    if (provider.id === "claude" || provider.type === "relay" || ["niubi", "hexuan"].includes(provider.id)) {
       row.classList.add("configurable");
       const configure = document.createElement("button");
       configure.className = "provider-configure";
       configure.type = "button";
-      configure.title = provider.type === "relay" ? "编辑供应商" : "配置 Claude Token 和模型";
+      configure.title = provider.type === "relay" || ["niubi", "hexuan"].includes(provider.id)
+        ? "编辑 API 连接"
+        : "配置 Claude Token 和模型";
       configure.setAttribute("aria-label", configure.title);
       configure.innerHTML = '<span data-lucide="settings"></span>';
       configure.addEventListener("click", () => (
-        provider.type === "relay" ? openRelayDialog(provider) : openClaudeDialog(provider)
+        provider.type === "relay" || ["niubi", "hexuan"].includes(provider.id)
+          ? openRelayDialog(provider)
+          : openClaudeDialog(provider)
       ));
       actions.appendChild(configure);
     }
@@ -1932,7 +2134,7 @@ async function removeProviderConnection(provider, button) {
   const confirmed = await confirmAction({
     eyebrow: "连接管理",
     title: `删除连接“${provider.connectionLabel || provider.label}”？`,
-    description: `将从 Synclattice 删除该连接及其${credential}。`,
+    description: `将从 ChatSwitch 删除该连接及其${credential}。`,
     detail: "共享聊天记录和其他模型连接不会被修改。",
     confirmLabel: "删除连接",
   });
@@ -1976,6 +2178,7 @@ function applyStoreSnapshot(snapshot) {
   state.threadSettings = snapshot.threadSettings || {};
   state.providerRoutes = snapshot.providerRoutes || state.providerRoutes;
   state.threadAliases = snapshot.threadAliases || {};
+  state.threadDecorations = snapshot.threadDecorations || {};
   state.hiddenThreadIds = new Set(snapshot.hiddenThreadIds || []);
   state.deletedThreadIds = new Set(snapshot.deletedThreadIds || []);
   state.localArchivedThreadIds = new Set(snapshot.localArchivedThreadIds || []);
@@ -2073,7 +2276,17 @@ async function openThread(thread) {
     const pendingConnection = state.connectionPromise;
     if (pendingConnection) await pendingConnection;
     if (!isCurrent()) return;
-    if (!state.connected) throw new Error("请先连接账号或 API。 ");
+    if (!state.connected) {
+      if (thread._historyEngine !== "openai-compatible") throw new Error("请先连接账号或 API。 ");
+      const readResult = await api.readLocalThread(thread.id);
+      if (!isCurrent()) return;
+      state.activeThread = readResult.thread;
+      state.activeArchived = true;
+      applyThreadSessionSettings(readResult.thread);
+      renderConversation(readResult.thread);
+      showDiagnostic("已导入的聊天记录可离线查看；连接模型后才能继续对话。", false);
+      return;
+    }
     if (state.activeArchived) {
       const readResult = await api.readThread(thread.id);
       if (!isCurrent()) return;
@@ -2378,7 +2591,12 @@ function renderItem(item, turnId = null, streaming = false) {
     return appendActivity({
       id: item.id,
       type: item.type,
-      command: labels[item.type] || "执行操作",
+      command: item.command || item.commandLine || item.tool || item.query || item.path || "",
+      detailText: item.type === "fileChange"
+        ? (item.diff || item.patch || item.output || item.aggregatedOutput
+          || (Array.isArray(item.changes) ? item.changes.map((change) => typeof change === "string" ? change : JSON.stringify(change, null, 2)).join("\n") : ""))
+        : "",
+      activityLabel: labels[item.type] || "执行操作",
       status: item.status,
     }, turnId);
   }
@@ -2504,26 +2722,33 @@ function safeImageSource(value, isLocal = false) {
 }
 
 function renderAttachments() {
-  SynclatticeVueRuntime.attachmentUi.items = state.pendingAttachments.map((filePath) => ({
+  ChatSwitchVueRuntime.attachmentUi.items = state.pendingAttachments.map((filePath) => ({
     path: filePath,
     name: String(filePath).split(/[\\/]/).filter(Boolean).at(-1) || "图片附件",
-    url: localImageUrl(filePath),
+    isImage: IMAGE_ATTACHMENT_PATTERN.test(filePath),
+    extension: (String(filePath).match(/\.([^.\\/]+)$/)?.[1] || "file").toUpperCase().slice(0, 5),
+    typeLabel: IMAGE_ATTACHMENT_PATTERN.test(filePath) ? "图片附件" : "文档附件",
+    url: IMAGE_ATTACHMENT_PATTERN.test(filePath) ? localImageUrl(filePath) : null,
   }));
 }
 
 function addAttachments(paths) {
   const existing = new Set(state.pendingAttachments.map(normalizePath));
+  let added = 0;
   for (const filePath of paths || []) {
     if (!filePath || existing.has(normalizePath(filePath))) continue;
     state.pendingAttachments.push(filePath);
     existing.add(normalizePath(filePath));
+    added += 1;
     if (state.pendingAttachments.length >= 8) break;
   }
   renderAttachments();
   syncComposerState();
+  return added;
 }
 
 const IMAGE_ATTACHMENT_PATTERN = /\.(?:gif|jpe?g|png|webp)$/i;
+const DOCUMENT_ATTACHMENT_PATTERN = /\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|json)$/i;
 let attachmentDragDepth = 0;
 
 function hasDraggedFiles(event) {
@@ -2531,7 +2756,7 @@ function hasDraggedFiles(event) {
 }
 
 function setAttachmentDragActive(active) {
-  SynclatticeVueRuntime.attachmentUi.dragActive = Boolean(active);
+  ChatSwitchVueRuntime.attachmentUi.dragActive = Boolean(active);
 }
 
 function resetAttachmentDrag() {
@@ -2552,14 +2777,15 @@ function droppedAttachmentPaths(files) {
 function addDroppedAttachments(paths) {
   const files = Array.from(paths || []).filter(Boolean);
   const images = files.filter((filePath) => IMAGE_ATTACHMENT_PATTERN.test(filePath));
-  if (images.length) addAttachments(images);
-  const unsupported = files.length - images.length;
-  if (unsupported > 0 && images.length) showDiagnostic(`已忽略 ${unsupported} 个非图片文件`, true);
-  if (files.length && !images.length) showDiagnostic("当前仅支持 PNG、JPG、WebP 和 GIF 图片附件", true);
-  return { added: images.length, unsupported };
+  const documents = files.filter((filePath) => DOCUMENT_ATTACHMENT_PATTERN.test(filePath));
+  const supported = [...images, ...documents];
+  const added = supported.length ? addAttachments(supported) : 0;
+  const unsupported = files.length - supported.length;
+  if (unsupported > 0) showDiagnostic(`已忽略 ${unsupported} 个不支持的文件`, true);
+  return { added, unsupported, images: images.length, documents: documents.length };
 }
 
-window.addEventListener("synclattice:remove-attachment", (event) => {
+window.addEventListener("chatswitch:remove-attachment", (event) => {
   const index = Number(event.detail?.index);
   if (!Number.isInteger(index) || index < 0 || index >= state.pendingAttachments.length) return;
   state.pendingAttachments.splice(index, 1);
@@ -2567,9 +2793,19 @@ window.addEventListener("synclattice:remove-attachment", (event) => {
   syncComposerState();
 });
 
-window.addEventListener("synclattice:copy-attachment", async (event) => {
+window.addEventListener("chatswitch:preview-attachment", async (event) => {
   const filePath = String(event.detail?.path || "");
   if (!filePath) return;
+  try {
+    await openFilePreview(filePath, event.detail?.trigger || null);
+  } catch (error) {
+    showDiagnostic(`预览附件失败：${error.message}`, true);
+  }
+});
+
+window.addEventListener("chatswitch:copy-attachment", async (event) => {
+  const filePath = String(event.detail?.path || "");
+  if (!filePath || !IMAGE_ATTACHMENT_PATTERN.test(filePath)) return;
   try {
     await api.copyImage({ path: filePath });
     showDiagnostic("图片已复制到剪贴板。", false);
@@ -2620,15 +2856,15 @@ async function pasteClipboardAttachments(event) {
   const directPaths = droppedAttachmentPaths(event.clipboardData?.files);
   if (directPaths.length) {
     const result = addDroppedAttachments(directPaths);
-    if (result.added) showDiagnostic(`已从剪贴板添加 ${result.added} 张图片。`, false);
+    if (result.added) showDiagnostic(`已从剪贴板添加 ${result.added} 个附件。`, false);
     return;
   }
   clipboardPastePending = true;
   try {
     const result = await api.pasteClipboardImages();
     const added = addDroppedAttachments(result?.paths || []);
-    if (added.added) showDiagnostic(`已从剪贴板添加 ${added.added} 张图片。`, false);
-    else showDiagnostic("剪贴板中没有可添加的图片附件。", true);
+    if (added.added) showDiagnostic(`已从剪贴板添加 ${added.added} 个附件。`, false);
+    else showDiagnostic("剪贴板中没有可添加的附件。", true);
   } catch (error) {
     showDiagnostic(`粘贴附件失败：${error.message}`, true);
   } finally {
@@ -2734,7 +2970,7 @@ function renderMessageQueuePanel(threadId = state.activeThread?.id) {
     const copy = document.createElement("span");
     copy.className = "queued-prompt-copy";
     const prompt = document.createElement("strong");
-    prompt.textContent = String(message.displayText || message.text || "").trim() || "图片附件";
+      prompt.textContent = String(message.displayText || message.text || "").trim() || "附件";
     prompt.title = prompt.textContent;
     const meta = document.createElement("small");
     const attachmentCount = queuedMessageAttachmentPaths(message).length;
@@ -2742,7 +2978,7 @@ function renderMessageQueuePanel(threadId = state.activeThread?.id) {
     meta.className = "queued-prompt-state";
     meta.textContent = steering
       ? "正在引导当前回复…"
-      : attachmentCount ? `${attachmentCount} 张图片 · 已排队` : "已排队";
+      : attachmentCount ? `${attachmentCount} 个附件 · 已排队` : "已排队";
     copy.append(prompt, meta);
     const actions = document.createElement("span");
     actions.className = "queued-prompt-actions";
@@ -2831,7 +3067,9 @@ function appendPendingUserMessage(text, id, attachments = [], delivery = null, t
     id,
     content: [
       ...(text ? [{ type: "text", text }] : []),
-      ...attachments.map((filePath) => ({ type: "localImage", path: filePath })),
+      ...attachments.map((filePath) => /\.(?:gif|jpe?g|png|webp)$/i.test(filePath)
+        ? { type: "localImage", path: filePath }
+        : { type: "localFile", path: filePath, fileName: filePath.split(/[\\/]/).pop() }),
     ],
   });
   node.dataset.pendingThreadId = threadId || "";
@@ -2844,11 +3082,11 @@ function appendUserMessage(item) {
   if (item.clientId) node.querySelector(".message-delivery-state")?.remove();
   node.querySelector(".message-media")?.remove();
   const images = (item.content || []).filter((part) => ["image", "localImage"].includes(part.type));
+  const files = (item.content || []).filter((part) => part.type === "localFile");
   node.dataset.attachmentSources = JSON.stringify(images.map((part) => ({
     path: part.path || null,
     url: part.url || null,
   })));
-  if (!images.length) return node;
   const media = document.createElement("div");
   media.className = "message-media";
   for (const part of images) {
@@ -2901,7 +3139,14 @@ function appendUserMessage(item) {
     mediaItem.append(image, copy);
     media.appendChild(mediaItem);
   }
-  node.querySelector(".message-body").appendChild(media);
+  if (files.length) {
+    const fileTray = document.createElement("div");
+    fileTray.className = "message-files";
+    fileTray.textContent = files.map((file) => file.fileName || String(file.path || "").split(/[\\/]/).pop()).join(" · ");
+    node.querySelector(".message-column")?.appendChild(fileTray);
+  }
+  if (images.length) node.querySelector(".message-body").appendChild(media);
+  enhanceFileLinks(node.querySelector(".message-body"));
   if (!state.renderTarget) refreshIcons();
   return node;
 }
@@ -3023,7 +3268,7 @@ function appendMessage(role, text, id = crypto.randomUUID(), phase = null, sourc
     node.dataset.messageId = id;
     node.dataset.messageRole = role;
     const providerLabel = sourceLabel || currentProviderDefinition()?.label
-      || (state.providerType === "claude" ? "Claude" : "Synclattice");
+      || (state.providerType === "claude" ? "Claude" : "ChatSwitch");
     const avatar = role === "user" ? "你" : providerInitials(providerLabel);
     node.innerHTML = `<div class="message-avatar">${avatar}</div><div class="message-column"><div class="message-header">${role === "user" ? "你" : escapeHtml(providerLabel)}</div><div class="message-body"></div></div>`;
     target.appendChild(node);
@@ -3036,6 +3281,7 @@ function appendMessage(role, text, id = crypto.randomUUID(), phase = null, sourc
     delete node.dataset.rawText;
   } else {
     body.innerHTML = role === "agent" ? renderMarkdown(text) : `<p>${escapeHtml(text).replaceAll("\n", "<br>")}</p>`;
+    if (role === "agent") enhanceFileLinks(body);
     node.dataset.rawText = String(text || "");
     streamTextChunks.delete(node);
   }
@@ -3058,10 +3304,12 @@ function appendMessage(role, text, id = crypto.randomUUID(), phase = null, sourc
 
 function appendActivity(item, turnId = null) {
   const target = conversationTarget();
+  let row = state.renderTarget ? null : target.querySelector(`[data-activity-id="${CSS.escape(item.id)}"]`);
+  let group = row?.closest(".activity") || null;
   const lastContent = target.lastElementChild?.classList.contains("thinking-indicator")
     ? target.lastElementChild.previousElementSibling
     : target.lastElementChild;
-  let group = lastContent?.classList.contains("activity") ? lastContent : null;
+  if (!group) group = lastContent?.classList.contains("activity") ? lastContent : null;
   if (group && turnId && group.dataset.turnId !== turnId) group = null;
   if (!group) {
     group = document.createElement("div");
@@ -3069,14 +3317,18 @@ function appendActivity(item, turnId = null) {
     if (turnId) group.dataset.turnId = turnId;
     target.appendChild(group);
   }
-  let row = group.querySelector(`[data-activity-id="${CSS.escape(item.id)}"]`);
+  row ||= group.querySelector(`[data-activity-id="${CSS.escape(item.id)}"]`);
   if (!row) {
     row = document.createElement("div");
     row.className = `activity-row activity-${String(item.type || "operation").replace(/[^a-z0-9_-]/gi, "-").toLowerCase()}`;
     row.dataset.activityId = item.id;
     group.appendChild(row);
   }
-  const details = item.command || item.tool || item.query || item.path || (item.changes ? `${item.changes.length} 个文件变更` : item.type);
+  const label = item.activityLabel || item.label || row.dataset.activityLabel || (item.type === "commandExecution" ? "执行命令" : null);
+  const details = item.command || item.tool || item.query || item.path || (item.changes ? `${item.changes.length} 个文件变更` : null)
+    || row.dataset.activityDetails || item.type;
+  row.dataset.activityLabel = label || "";
+  row.dataset.activityDetails = details || "";
   const icon = item.type === "commandExecution" ? "terminal"
     : item.type === "fileChange" ? "file-diff"
       : item.type === "webSearch" ? "globe"
@@ -3085,7 +3337,47 @@ function appendActivity(item, turnId = null) {
   const output = item.displayOutput && item.aggregatedOutput
     ? `<pre class="activity-output">${escapeHtml(item.aggregatedOutput)}</pre>`
     : "";
-  row.innerHTML = `<span data-lucide="${icon}"></span><code>${escapeHtml(details)}</code><span>${escapeHtml(item.status || "")}</span>${output}`;
+  const incomingCommand = item.type === "commandExecution" && details && details !== label ? String(details) : "";
+  if (incomingCommand) row.dataset.commandText = incomingCommand;
+  const commandText = item.type === "commandExecution" ? (incomingCommand || row.dataset.commandText || "") : "";
+  const incomingChange = item.type === "fileChange" && item.detailText ? String(item.detailText) : "";
+  if (incomingChange) row.dataset.changeText = incomingChange;
+  const changeText = item.type === "fileChange"
+    ? (incomingChange || row.dataset.changeText || (details && details !== label ? `文件：${details}\n运行时未提供具体 diff。` : ""))
+    : "";
+  const detailExpanded = row.dataset.detailExpanded === "true";
+  const rawDetailText = commandText || changeText;
+  const detailText = rawDetailText.length > 120000
+    ? `${rawDetailText.slice(0, 120000)}\n\n… 修改内容过长，已截断显示。`
+    : rawDetailText;
+  const detailButton = detailText
+    ? `<button class="activity-command-toggle" type="button" aria-expanded="${detailExpanded ? "true" : "false"}"><span data-lucide="${changeText ? "file-diff" : "terminal-square"}"></span><span>${detailExpanded ? "收起" : changeText ? "查看修改" : "查看命令"}</span></button>`
+    : "";
+  const meta = detailButton || item.status
+    ? `<span class="activity-meta"><span class="activity-status">${escapeHtml(item.status || "")}</span>${detailButton}</span>`
+    : "";
+  row.innerHTML = `<span data-lucide="${icon}"></span><code>${escapeHtml(label || details)}</code>${meta}${detailText ? `<pre class="activity-command${detailExpanded ? "" : " hidden"}">${escapeHtml(detailText)}</pre>` : ""}${output}`;
+  const commandToggle = row.querySelector(".activity-command-toggle");
+  if (commandToggle) {
+    commandToggle.addEventListener("click", () => {
+      const expanded = row.dataset.detailExpanded === "true";
+      row.dataset.detailExpanded = expanded ? "false" : "true";
+      const command = row.querySelector(".activity-command");
+      command?.classList.toggle("hidden", expanded);
+      commandToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+      const textNode = commandToggle.querySelector("span:last-child");
+      if (textNode) textNode.textContent = expanded
+        ? (changeText ? "查看修改" : "查看命令")
+        : (changeText ? "收起修改" : "收起命令");
+      const iconNode = commandToggle.querySelector("[data-lucide]");
+      if (iconNode) iconNode.dataset.lucide = expanded ? (changeText ? "file-diff" : "terminal-square") : "chevron-up";
+      refreshIcons();
+    });
+  }
+  const documentPath = localDocumentPath(item.path || details);
+  if (documentPath) {
+    row.appendChild(fileOpenButton(documentPath, `打开 ${documentPath.split(/[\\/]/).pop()}`));
+  }
   if (!state.renderTarget) {
     syncThinkingIndicator();
     refreshIcons();
@@ -3109,7 +3401,22 @@ function appendActivityImage(itemId, value, turnId, isLocal = true) {
   if (turnId) row.closest(".activity").dataset.turnId = turnId;
 }
 
-function renderActivityDelta(itemId, turnId, label, delta, icon = "terminal") {
+function renderActivityDelta(itemId, turnId, label, delta, icon = "terminal", eventThreadId = null, activityType = "stream") {
+  if (activityType === "fileChange") {
+    const existing = elements.chat.querySelector(`[data-activity-id="${CSS.escape(itemId)}"]`);
+    const previous = existing?.dataset.changeText || "";
+    const changeText = previous.length >= 120000
+      ? previous
+      : `${previous}${String(delta || "")}`.slice(0, 120000);
+    appendActivity({
+      id: itemId,
+      type: "fileChange",
+      activityLabel: existing?.dataset.activityLabel || label,
+      detailText: changeText,
+      status: "进行中",
+    }, turnId);
+    return;
+  }
   let row = elements.chat.querySelector(`[data-activity-id="${CSS.escape(itemId)}"]`);
   if (!row) {
     appendActivity({ id: itemId, type: "stream", command: label, status: "进行中" }, turnId);
@@ -3143,6 +3450,7 @@ function finalizeStreamingNode(node) {
   const text = streamingText(node);
   node.dataset.rawText = text;
   body.innerHTML = renderMarkdown(text);
+  enhanceFileLinks(body);
   streamTextChunks.delete(node);
   node.classList.remove("streaming");
   node.removeAttribute("aria-busy");
@@ -3277,7 +3585,7 @@ function restoreRecoveredTurns(value) {
       error: {
         code: restarted ? "APP_RESTARTED" : "SERVER_DISCONNECTED",
         message: restarted
-          ? "Synclattice 上次在回答完成前关闭。当前会话记录和待发送消息均已保留，可以继续生成或让队列继续发送。"
+          ? "ChatSwitch 上次在回答完成前关闭。当前会话记录和待发送消息均已保留，可以继续生成或让队列继续发送。"
           : "模型连接在回答完成前退出。当前会话记录和待发送消息均已保留，可以继续生成或让队列继续发送。",
       },
     });
@@ -3413,7 +3721,18 @@ async function sendMessage(_deliveryMode = "auto") {
   const text = elements.input.value.trim();
   const attachments = [...state.pendingAttachments];
   if ((!text && !attachments.length) || !state.connected || state.submitting) return;
-  const { prompt, skillInputs } = parseSkillInvocations(text);
+  const { prompt: parsedPrompt, skillInputs } = parseSkillInvocations(text);
+  let prompt = parsedPrompt;
+  if (attachments.some((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath))) {
+    try {
+      const extracted = await api.extractFileText(attachments.filter((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath)));
+      const context = extracted.map((file) => "\n\n[文件：" + file.fileName + "]\n" + file.content + "\n[/文件]").join("");
+      prompt = (parsedPrompt + context).trim();
+    } catch (error) {
+      showDiagnostic("文件内容提取失败：" + error.message, true);
+      return;
+    }
+  }
   const generation = state.openThreadGeneration;
   const isCurrent = (threadId = null) => generation === state.openThreadGeneration
     && (!threadId || state.activeThread?.id === threadId);
@@ -3432,7 +3751,9 @@ async function sendMessage(_deliveryMode = "auto") {
       text: prompt,
       displayText: text,
       skillInputs,
-      imageInputs: attachments.map((filePath) => ({ path: filePath, detail: "auto" })),
+      imageInputs: attachments.filter((filePath) => /\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, detail: "auto" })),
+      fileInputs: attachments.filter((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, fileName: filePath.split(/[\\\\/]/).pop() })),
+      webSearch: state.webSearchEnabled,
       cwd: workspace,
       clientUserMessageId,
       providerId: state.provider,
@@ -3509,7 +3830,9 @@ async function sendMessage(_deliveryMode = "auto") {
       text: prompt,
       displayText: text,
       skillInputs,
-      imageInputs: attachments.map((filePath) => ({ path: filePath, detail: "auto" })),
+      imageInputs: attachments.filter((filePath) => /\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, detail: "auto" })),
+      fileInputs: attachments.filter((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, fileName: filePath.split(/[\\\\/]/).pop() })),
+      webSearch: state.webSearchEnabled,
       cwd: workspace,
       clientUserMessageId,
       ...sessionSettings,
@@ -3603,7 +3926,7 @@ async function startNextQueuedMessage(threadId) {
     }
     renderMessageQueuePanel(threadId);
     showDiagnostic(`排队消息发送失败：${error.message}`, true);
-    api.notify({ title: "Synclattice", body: `排队消息发送失败：${error.message}` }).catch(() => {});
+    api.notify({ title: "ChatSwitch", body: `排队消息发送失败：${error.message}` }).catch(() => {});
   } finally {
     state.queueDispatchingThreads.delete(threadId);
     renderMessageQueuePanel(threadId);
@@ -3660,7 +3983,7 @@ function syncThinkingIndicator() {
     indicator.setAttribute("role", "status");
     indicator.setAttribute("aria-live", "polite");
     const providerLabel = currentProviderDefinition()?.label
-      || (state.providerType === "claude" ? "Claude" : "Synclattice");
+      || (state.providerType === "claude" ? "Claude" : "ChatSwitch");
     indicator.innerHTML = `
       <span class="thinking-avatar">${escapeHtml(providerInitials(providerLabel))}</span>
       <span class="thinking-copy">
@@ -3818,7 +4141,7 @@ function notifyThreadCompletion(threadId, turn, run = null) {
   const body = status === "failed"
     ? `${title} 运行失败`
     : status === "interrupted" ? `${title} 已停止` : `${title} 已完成`;
-  api.notify({ title: "Synclattice", body }).catch(() => {});
+  api.notify({ title: "ChatSwitch", body }).catch(() => {});
 }
 
 function completeThreadRun(threadId, turn) {
@@ -3938,8 +4261,10 @@ function handleEvent(message) {
   } else if (method === "item/agentMessage/delta") {
     const id = params.itemId || "stream-agent";
     appendAgentMessageDelta(id, params.delta);
-  } else if (method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta") {
+  } else if (method === "item/commandExecution/outputDelta") {
     return;
+  } else if (method === "item/fileChange/outputDelta") {
+    renderActivityDelta(params.itemId, params.turnId, "修改内容", params.delta, "file-diff", eventThreadId, "fileChange");
   } else if (method === "item/reasoning/summaryTextDelta") {
     appendActivityDelta(params.itemId, params.turnId, "思考过程", params.delta, "brain", eventThreadId);
   } else if (method === "item/plan/delta") {
@@ -4232,7 +4557,7 @@ function newChat(switchToActive = true) {
     elements.windowTitle.textContent = state.activeProject ? `${state.activeProject.label} · 新会话` : "新会话";
     elements.emptySubtitle.textContent = state.activeProject
       ? state.activeProject.label
-      : "Synclattice";
+      : "ChatSwitch";
     elements.input.focus();
   }
   syncComposerState();
@@ -4248,6 +4573,7 @@ function openThreadMenu(thread, event) {
   const renameButton = elements.menu.querySelector("[data-action=rename]");
   const deleteButton = elements.menu.querySelector("[data-action=delete-now]");
   const clearQueueButton = elements.menu.querySelector("[data-action=clear-queue]");
+  const decoration = state.threadDecorations[thread.id] || {};
   const hidden = state.hiddenThreadIds.has(thread.id);
   const deletion = pendingDeletion(thread.id);
   const locallyArchived = state.localArchivedThreadIds.has(thread.id);
@@ -4261,6 +4587,8 @@ function openThreadMenu(thread, event) {
   renameButton.classList.toggle("hidden", hidden);
   deleteButton.classList.toggle("hidden", !hidden);
   clearQueueButton.classList.toggle("hidden", !(state.messageQueues.get(thread.id) || []).length);
+  elements.menu.querySelector("[data-action=pin]").innerHTML = '<span data-lucide="pin"></span>' + (decoration.pinned ? "取消置顶" : "置顶");
+  elements.menu.querySelector("[data-action=favorite]").innerHTML = '<span data-lucide="star"></span>' + (decoration.favorite ? "取消收藏" : "收藏");
   const anchor = event.currentTarget?.getBoundingClientRect?.();
   const clientX = event.clientX || (anchor ? anchor.right - 8 : 0);
   const clientY = event.clientY || (anchor ? anchor.bottom : 0);
@@ -4314,7 +4642,40 @@ async function threadMenuAction(action) {
       if (!name) return;
       state.threadAliases = await api.renameThreadLocal({ threadId: thread.id, name });
       applyThreadName(thread.id, name);
-      showDiagnostic("会话名称已在 Synclattice 中更新，原始记录未修改。", false);
+      showDiagnostic("会话名称已在 ChatSwitch 中更新，原始记录未修改。", false);
+    } else if (action === "pin" || action === "favorite") {
+      const current = state.threadDecorations[thread.id] || {};
+      state.threadDecorations = await api.setThreadDecoration({
+        threadId: thread.id,
+        pinned: action === "pin" ? !current.pinned : current.pinned,
+        favorite: action === "favorite" ? !current.favorite : current.favorite,
+        tags: current.tags || [],
+      });
+      applyThreadFilter();
+      showDiagnostic(action === "pin" ? (current.pinned ? "已取消置顶。" : "会话已置顶。") : (current.favorite ? "已取消收藏。" : "会话已收藏。"), false);
+      return;
+    } else if (action === "tag") {
+      const current = state.threadDecorations[thread.id] || {};
+      const value = window.prompt("输入标签，多个标签用逗号分隔", (current.tags || []).join(", "));
+      if (value === null) return;
+      state.threadDecorations = await api.setThreadDecoration({
+        threadId: thread.id,
+        pinned: current.pinned,
+        favorite: current.favorite,
+        tags: value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean),
+      });
+      applyThreadFilter();
+      showDiagnostic("会话标签已更新。", false);
+      return;
+    } else if (action === "export") {
+      const value = window.prompt("导出格式：md、html、pdf 或 json", "md");
+      if (!value || !["md", "html", "pdf", "json"].includes(value.toLowerCase())) {
+        showDiagnostic("请输入 md、html、pdf 或 json。", true);
+        return;
+      }
+      const result = await api.exportThread({ threadId: thread.id, format: value.toLowerCase() });
+      if (!result.canceled) showDiagnostic("会话已导出到 " + result.filePath, false);
+      return;
     } else if (action === "archive") {
       state.localArchivedThreadIds = new Set(await api.archiveThreadLocal(thread.id));
       if (state.activeThread?.id === thread.id) newChat();
@@ -4322,7 +4683,7 @@ async function threadMenuAction(action) {
       updateThreadViewControls();
       applyThreadFilter();
       renderProjects();
-      showDiagnostic("会话已归档到 Synclattice。", false);
+      showDiagnostic("会话已归档到 ChatSwitch。", false);
       return;
     } else if (action === "unarchive") {
       state.localArchivedThreadIds = new Set(await api.unarchiveThreadLocal(thread.id));
@@ -4336,8 +4697,8 @@ async function threadMenuAction(action) {
     } else if (action === "remove") {
       const confirmed = await confirmAction({
         eyebrow: "会话管理",
-        title: "从 Synclattice 中移除这个会话？",
-        description: "移除后可在一小时内恢复，到期后会从 Synclattice 列表清除。",
+        title: "从 ChatSwitch 中移除这个会话？",
+        description: "移除后可在一小时内恢复，到期后会从 ChatSwitch 列表清除。",
         detail: "原始 ChatGPT、Codex 和 Claude 会话记录完全不变。",
         confirmLabel: "移除会话",
       });
@@ -4367,8 +4728,8 @@ async function threadMenuAction(action) {
     } else if (action === "delete-now") {
       const confirmed = await confirmAction({
         eyebrow: "立即删除",
-        title: "立即从 Synclattice 中删除这个会话？",
-        description: "该操作无法在 Synclattice 中撤销。",
+        title: "立即从 ChatSwitch 中删除这个会话？",
+        description: "该操作无法在 ChatSwitch 中撤销。",
         detail: "原始 ChatGPT、Codex 和 Claude 会话记录不会被删除或修改。",
         confirmLabel: "立即删除",
       });
@@ -4381,7 +4742,7 @@ async function threadMenuAction(action) {
       updateThreadViewControls();
       syncProjects();
       applyThreadFilter();
-      showDiagnostic("会话已从 Synclattice 中永久移除，原始记录未修改。", false);
+      showDiagnostic("会话已从 ChatSwitch 中永久移除，原始记录未修改。", false);
       return;
     } else if (action === "clear-queue") {
       const count = (state.messageQueues.get(thread.id) || []).length;
@@ -4539,9 +4900,11 @@ function openClaudeDialog(provider, errorMessage = "") {
   $("#claude-vendor-label").value = provider.vendorLabel || "";
   $("#claude-base-url").value = provider.baseUrl || "https://api.anthropic.com/v1";
   $("#claude-api-key").value = "";
-  $("#claude-api-key").required = !provider.hasStoredKey;
+  $("#claude-api-key").required = !provider.hasStoredKey && provider.authMode !== "oauth";
   $("#claude-error").textContent = errorMessage;
-  $("#claude-model-status").textContent = provider.hasStoredKey ? "可读取已保存 Token 的模型列表" : "请先输入 Token";
+  $("#claude-model-status").textContent = provider.authMode === "oauth"
+    ? "已使用 Anthropic 官方登录"
+    : provider.hasStoredKey ? "可读取已保存 Token 的模型列表" : "请先输入 Token";
   $("#claude-model").innerHTML = `<option value="${escapeHtml(provider.model || "")}">${escapeHtml(provider.model || "请先读取模型列表")}</option>`;
   refreshIcons();
   if (provider.hasStoredKey) loadClaudeModels();
@@ -4552,12 +4915,28 @@ function closeClaudeDialog() {
   elements.overlay.classList.remove("hidden");
 }
 
-function openRecordHomeDialog() {
+async function loadConversationMirrorSettings() {
+  try {
+    const settings = await api.conversationMirrorStatus();
+    $("#conversation-mirror-source").value = settings.source || "";
+    $("#conversation-mirror-interval").value = String(Math.round((settings.intervalMs || 60000) / 1000));
+    $("#conversation-mirror-enabled").checked = Boolean(settings.enabled);
+    const last = settings.lastResult;
+    $("#conversation-mirror-status").textContent = last?.completedAt
+      ? `上次复制：${new Date(last.completedAt).toLocaleString("zh-CN")} · 新增 ${last.copied || 0} · 更新 ${last.updated || 0}`
+      : settings.source ? "已配置，尚未执行复制" : "尚未配置 Codex 原始记录目录";
+  } catch (error) {
+    $("#conversation-mirror-status").textContent = error.message || "无法读取副本设置";
+  }
+}
+
+async function openRecordHomeDialog() {
   elements.recordHomeInput.value = state.recordHome;
   $("#record-home-error").textContent = "";
   elements.overlay.classList.add("hidden");
   elements.recordHomeOverlay.classList.remove("hidden");
   refreshIcons();
+  await loadConversationMirrorSettings();
 }
 
 function closeRecordHomeDialog() {
@@ -4599,6 +4978,10 @@ function renderLocalHistoryList(result) {
   state.localHistoryConversations = result.conversations || [];
   elements.localHistoryList.innerHTML = "";
   elements.localHistorySummary.textContent = `${result.total || 0} 条会话${result.total > state.localHistoryConversations.length ? ` · 显示前 ${state.localHistoryConversations.length} 条` : ""}`;
+  elements.localHistoryImportAll.disabled = state.localHistoryBulkLoading || !state.localHistorySources.some((source) => source.available);
+  elements.localHistoryImportAll.title = elements.localHistorySearch.value.trim()
+    ? "导入所有来源中匹配当前搜索词的会话"
+    : "导入 Codex、Codex App 和 Claude Code 扫描到的全部会话";
   if (!state.localHistoryConversations.length) {
     const empty = document.createElement("div");
     empty.className = "local-history-list-empty";
@@ -4638,6 +5021,7 @@ async function loadLocalHistory() {
   if (!state.localHistorySourceId || elements.localHistoryOverlay.classList.contains("hidden")) return;
   const generation = ++state.localHistoryGeneration;
   state.localHistoryLoading = true;
+  elements.localHistoryImportAll.disabled = true;
   elements.localHistorySummary.textContent = "正在读取…";
   elements.localHistoryList.innerHTML = '<div class="local-history-list-empty local-history-loading"><span data-lucide="loader-circle"></span>正在建立只读索引</div>';
   refreshIcons();
@@ -4664,7 +5048,44 @@ async function loadLocalHistory() {
     elements.localHistoryList.appendChild(empty);
     localHistoryEmpty("circle-alert", "无法读取本地记录", error.message || "请稍后重试。");
   } finally {
-    if (generation === state.localHistoryGeneration) state.localHistoryLoading = false;
+    if (generation === state.localHistoryGeneration) {
+      state.localHistoryLoading = false;
+      elements.localHistoryImportAll.disabled = state.localHistoryBulkLoading || !state.localHistorySources.some((source) => source.available);
+    }
+  }
+}
+
+async function importAllLocalHistory() {
+  if (state.localHistoryBulkLoading || !state.localHistorySourceId
+    || !state.localHistorySources.some((source) => source.available)) return;
+  const search = elements.localHistorySearch.value.trim();
+  const countLabel = elements.localHistorySummary.textContent || `${state.localHistoryConversations.length} 条会话`;
+  state.localHistoryBulkLoading = true;
+  elements.localHistoryImportAll.disabled = true;
+  elements.localHistoryImportAll.setAttribute("aria-busy", "true");
+  elements.localHistoryImportAll.innerHTML = '<span data-lucide="loader-circle"></span>正在导入…';
+  elements.localHistorySummary.textContent = `正在导入 ${countLabel}…`;
+  refreshIcons();
+  try {
+    const sourceIds = state.localHistorySources.filter((source) => source.available).map((source) => source.id);
+    const result = await api.importAllLocalHistory({ sourceIds, search });
+    const parts = [`导入 ${result.imported || 0}`, `跳过 ${result.duplicate || 0}`];
+    if (result.failed) parts.push(`失败 ${result.failed}`);
+    elements.localHistorySummary.textContent = `批量完成：${parts.join(" · ")}`;
+    if (result.errors?.length) {
+      elements.localHistorySummary.title = result.errors.join("\n");
+      showDiagnostic(`有 ${result.failed} 条记录导入失败，悬停查看详情。`, true);
+    }
+    await loadThreads();
+  } catch (error) {
+    elements.localHistorySummary.textContent = error.message || "批量导入失败";
+    showDiagnostic(elements.localHistorySummary.textContent, true);
+  } finally {
+    state.localHistoryBulkLoading = false;
+    elements.localHistoryImportAll.removeAttribute("aria-busy");
+    elements.localHistoryImportAll.innerHTML = '<span data-lucide="copy-plus"></span><span>导入扫描到的全部</span>';
+    elements.localHistoryImportAll.disabled = !state.localHistorySources.some((source) => source.available);
+    refreshIcons();
   }
 }
 
@@ -4700,7 +5121,7 @@ function renderLocalHistoryPreview(conversation) {
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "primary-command local-history-import-button";
-  copy.innerHTML = '<span data-lucide="copy-plus"></span><span>复制到 Synclattice</span>';
+  copy.innerHTML = '<span data-lucide="copy-plus"></span><span>复制到 ChatSwitch</span>';
   copy.addEventListener("click", () => importLocalHistoryConversation(conversation, copy, status));
   actions.append(status, copy);
   header.append(headingCopy, actions);
@@ -4750,14 +5171,17 @@ async function importLocalHistoryConversation(conversation, button, status) {
   status.textContent = "正在创建私有副本…";
   try {
     const result = await api.importLocalHistory({ conversationId: conversation.id });
-    const prefix = result.duplicate ? "已存在 Synclattice 副本。" : "已复制到 Synclattice。";
+    const prefix = result.duplicate ? "已存在 ChatSwitch 副本。" : "已复制到 ChatSwitch。";
     status.textContent = result.truncated
       ? `${prefix} 当前副本只包含预览中可读取的消息。`
       : `${prefix} 原始记录保持不变。`;
     button.innerHTML = '<span data-lucide="check"></span><span>已复制</span>';
     refreshIcons();
-    if (!state.connected) return;
     await loadThreads();
+    if (!state.connected) {
+      status.textContent = `${status.textContent} 已加载到左侧列表；连接模型后才能继续。`;
+      return;
+    }
     const thread = [...state.activeThreads, ...state.archivedThreads]
       .find((item) => item.id === result.thread?.id) || result.thread;
     closeLocalHistoryDialog();
@@ -5188,14 +5612,14 @@ function closeAppSettingsDialog() {
 const deepLinkImportLabels = {
   provider: { title: "导入模型供应商", description: "确认后继续填写 API Key，链接本身不会保存密钥。", icon: "network" },
   mcp: { title: "导入 MCP 服务", description: "仅导入连接结构；环境变量密钥需要随后在本机填写。", icon: "server-cog" },
-  prompt: { title: "导入 Prompt 模板", description: "模板会保存到 Synclattice 私有扩展中心。", icon: "text-cursor-input" },
+  prompt: { title: "导入 Prompt 模板", description: "模板会保存到 ChatSwitch 私有扩展中心。", icon: "text-cursor-input" },
   skill: { title: "从 GitHub 安装 Skill", description: "确认后下载公开仓库，并执行路径与文件安全检查。", icon: "package-plus" },
 };
 
 function importPreviewRows(importType, config) {
   if (importType === "provider") return [["名称", config.label], ["Base URL", config.baseUrl], ["默认模型", config.model], ["协议", config.protocol]];
   if (importType === "prompt") return [["命令", `/${config.name}`], ["说明", config.description || "无"], ["模板内容", config.content]];
-  if (importType === "skill") return [["GitHub 仓库", config.source], ["安装位置", "Synclattice 私有 Skill 库"]];
+  if (importType === "skill") return [["GitHub 仓库", config.source], ["安装位置", "ChatSwitch 私有 Skill 库"]];
   return [
     ["名称", config.name], ["传输方式", config.transport],
     [config.transport === "stdio" ? "启动命令" : "服务 URL", config.transport === "stdio" ? config.command : config.url],
@@ -5459,7 +5883,7 @@ async function removeScheduledTask(task, button) {
   const confirmed = await confirmAction({
     eyebrow: "已安排任务",
     title: `删除任务“${task.title}”？`,
-    description: "将删除 Synclattice 中的任务配置，并停止之后的重复执行。",
+    description: "将删除 ChatSwitch 中的任务配置，并停止之后的重复执行。",
     detail: "已经生成的会话和聊天记录不会被删除。",
     confirmLabel: "删除任务",
   });
@@ -5482,6 +5906,11 @@ $("#official-login-button").addEventListener("click", async (event) => {
   const providerId = ["official", "account"].includes(state.providerType)
     ? state.provider
     : state.officialLoginProvider || "official";
+  const providerDefinition = state.providers.find((item) => item.id === providerId);
+  if (providerDefinition && !["official", "account"].includes(providerDefinition.type)) {
+    elements.providerError.textContent = "此按钮只用于 ChatGPT / Codex 官方登录，请使用 Claude Code 独立登录入口。";
+    return;
+  }
   button.disabled = true;
   elements.providerError.textContent = "请在浏览器中完成 ChatGPT 登录...";
   try {
@@ -5500,6 +5929,40 @@ $("#official-login-button").addEventListener("click", async (event) => {
   } finally {
     button.disabled = false;
     renderAccountPanel();
+  }
+});
+$("#claude-official-entry-button").addEventListener("click", () => {
+  const provider = state.providers.find((item) => item.id === "claude") || {
+    id: "claude",
+    type: "claude",
+    brand: "claude",
+    label: "Claude Code",
+    connectionLabel: "Claude Code",
+    model: "fable",
+    baseUrl: "https://api.anthropic.com/v1",
+  };
+  openClaudeDialog(provider);
+});
+
+$("#claude-official-login-button").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const status = $("#claude-official-login-status");
+  button.disabled = true;
+  status.textContent = "正在打开 Anthropic 官方登录页面...";
+  try {
+    const result = await api.claudeOfficialLogin();
+    if (result?.provider) upsertProvider(result.provider);
+    renderProviderOptions();
+    status.textContent = "登录成功，正在连接 Claude Code...";
+    elements.claudeOverlay.classList.add("hidden");
+    const connected = await connect("claude");
+    if (!connected) throw new Error("Claude Code 登录成功，但连接初始化失败，请重试。");
+    showDiagnostic("已登录 Claude Code 官方账号。", false);
+  } catch (error) {
+    status.textContent = actionErrorMessage(error);
+    showActionError(error);
+  } finally {
+    button.disabled = false;
   }
 });
 function renderProviderPresetCatalog(catalog = []) {
@@ -5629,9 +6092,9 @@ function renderProviderFallbackChain(candidates = []) {
 }
 
 function localProviderStatus(candidate) {
-  if (candidate.duplicate) return "已存在于 Synclattice";
+  if (candidate.duplicate) return "已存在于 ChatSwitch";
   if (!candidate.hasCredential) return "未找到可导入的 API Key";
-  if (candidate.kind === "claude") return "将更新 Synclattice 的 Claude Code 连接";
+  if (candidate.kind === "claude") return "将更新 ChatSwitch 的 Claude Code 连接";
   return "可安全导入";
 }
 
@@ -5749,7 +6212,7 @@ async function importSelectedLocalProviders() {
   if (!candidateIds.length) return;
   const button = elements.localProviderImportButton;
   button.disabled = true;
-  elements.localProviderStatus.textContent = "正在加密保存到 Synclattice...";
+  elements.localProviderStatus.textContent = "正在加密保存到 ChatSwitch...";
   try {
     const response = await api.importLocalProviders(candidateIds);
     state.providers = response.providers || state.providers;
@@ -5786,12 +6249,10 @@ function openRelayDialog(provider = null, draft = null) {
     form.elements.label.value = provider.label || "";
     form.elements.baseUrl.value = provider.baseUrl || "";
     form.elements.protocol.value = provider.protocol || "chat_completions";
-    form.elements.apiKey.required = false;
-    form.elements.apiKey.placeholder = "留空则继续使用已加密保存的密钥";
+    applyApiKeyDisplay(form.elements.apiKey, provider.hasStoredKey);
   } else {
     form.elements.preset.value = state.providerPresets.deepseek ? "deepseek" : Object.keys(state.providerPresets)[0] || "";
-    form.elements.apiKey.required = true;
-    form.elements.apiKey.placeholder = "仅加密保存在本机";
+    applyApiKeyDisplay(form.elements.apiKey, false);
     applyProviderPreset(true);
     if (draft) {
       form.elements.preset.value = state.providerPresets[draft.preset] ? draft.preset : "custom";
@@ -5815,6 +6276,9 @@ function openRelayDialog(provider = null, draft = null) {
   $("#provider-model-status").textContent = state.probedProviderModels.length
     ? `已保存 ${state.probedProviderModels.length} 个模型`
     : "";
+  $("#provider-api-key-help").innerHTML = provider?.hasStoredKey
+    ? `当前 Key 已配置并显示为 <code>${MASKED_API_KEY}</code>。输入新 Key 可替换；星号不会作为密钥保存。`
+    : "尚未配置可用的 API Key。请输入后测试连接；Key 仅加密保存在本机。";
   $("#connection-error").textContent = "";
   elements.overlay.classList.add("hidden");
   $("#connection-overlay").classList.remove("hidden");
@@ -5847,6 +6311,7 @@ $("#schedule-task-button").addEventListener("click", () => {
 $("#local-history-button").addEventListener("click", openLocalHistoryDialog);
 $("#provider-local-history-button").addEventListener("click", openLocalHistoryDialog);
 $("#local-history-close-button").addEventListener("click", closeLocalHistoryDialog);
+elements.localHistoryImportAll.addEventListener("click", importAllLocalHistory);
 $("#local-history-refresh-button").addEventListener("click", loadLocalHistory);
 elements.localHistorySearch.addEventListener("input", () => {
   clearTimeout(elements.localHistorySearch._timer);
@@ -5854,6 +6319,24 @@ elements.localHistorySearch.addEventListener("input", () => {
 });
 elements.localHistoryOverlay.addEventListener("click", (event) => {
   if (event.target === elements.localHistoryOverlay) closeLocalHistoryDialog();
+});
+elements.filePreviewClose.addEventListener("click", closeFilePreview);
+elements.filePreviewDone.addEventListener("click", closeFilePreview);
+elements.filePreviewOverlay.addEventListener("click", (event) => {
+  if (event.target === elements.filePreviewOverlay) closeFilePreview();
+});
+elements.filePreviewOpenSystem.addEventListener("click", async () => {
+  const filePath = filePreviewPath;
+  if (!filePath) return;
+  elements.filePreviewOpenSystem.disabled = true;
+  elements.filePreviewError.textContent = "";
+  try {
+    await api.openFile(filePath);
+  } catch (error) {
+    elements.filePreviewError.textContent = error.message || "无法调用系统程序打开文件。";
+  } finally {
+    elements.filePreviewOpenSystem.disabled = false;
+  }
 });
 $("#task-close-button").addEventListener("click", closeTaskDialog);
 $("#task-run-now-button").addEventListener("click", () => {
@@ -5954,6 +6437,7 @@ elements.taskForm.addEventListener("submit", async (event) => {
 elements.claudeForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget));
+  if (String(data.apiKey || "").trim()) data.authMode = "token";
   const button = event.currentTarget.querySelector("button[type=submit]");
   button.disabled = true;
   $("#claude-error").textContent = "正在保存...";
@@ -6001,6 +6485,13 @@ document.querySelectorAll("[data-connection-tab]").forEach((button) => button.ad
   $("#account-form").classList.toggle("hidden", button.dataset.connectionTab !== "account");
 }));
 $("#provider-preset").addEventListener("change", () => applyProviderPreset(true));
+$("#relay-form").elements.apiKey.addEventListener("focus", (event) => {
+  if (event.currentTarget.dataset.maskedCredential === "true") event.currentTarget.select();
+});
+$("#relay-form").elements.apiKey.addEventListener("input", (event) => {
+  if (event.currentTarget.value !== MASKED_API_KEY) event.currentTarget.dataset.maskedCredential = "false";
+  event.currentTarget.setAttribute("aria-invalid", "false");
+});
 $("#provider-fallback").addEventListener("change", (event) => {
   const providerId = event.currentTarget.value;
   if (providerId && !state.routeFallbackDraft.includes(providerId)) state.routeFallbackDraft.push(providerId);
@@ -6017,13 +6508,23 @@ $("#provider-load-models").addEventListener("click", async (event) => {
   const form = $("#relay-form");
   const status = $("#provider-model-status");
   button.disabled = true;
+  button.setAttribute("aria-busy", "true");
   status.textContent = "正在测试连接...";
   $("#connection-error").textContent = "";
+  const apiKey = displayedApiKeyValue(form.elements.apiKey);
+  if (!apiKey && !state.editingRelay?.hasStoredKey) {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    form.elements.apiKey.setAttribute("aria-invalid", "true");
+    $("#connection-error").textContent = "请输入 API Key 后再测试连接。";
+    form.elements.apiKey.focus();
+    return;
+  }
   try {
     const result = await api.probeProviderModels({
       providerId: state.editingRelay?.id || null,
       baseUrl: form.elements.baseUrl.value,
-      apiKey: form.elements.apiKey.value,
+      apiKey,
     });
     state.probedProviderModels = result.models;
     renderProviderModelOptions();
@@ -6037,12 +6538,14 @@ $("#provider-load-models").addEventListener("click", async (event) => {
     $("#connection-error").textContent = error.message;
   } finally {
     button.disabled = false;
+    button.removeAttribute("aria-busy");
   }
 });
 $("#relay-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
+  data.apiKey = displayedApiKeyValue(form.elements.apiKey);
   data.label = String(data.label || "").trim() || "ChatGPT 官方账号";
   data.discoveredModels = [...state.probedProviderModels];
   if (!data.model || !data.discoveredModels.includes(data.model)) {
@@ -6055,28 +6558,30 @@ $("#relay-form").addEventListener("submit", async (event) => {
   try {
     const wasEditing = Boolean(state.editingRelay);
     const provider = state.editingRelay
-      ? await api.updateRelay(data)
+      ? (["niubi", "hexuan"].includes(state.editingRelay.id)
+        ? await api.updateBuiltinApi(data)
+        : await api.updateRelay(data))
       : await api.addRelay(data);
     if (!wasEditing) {
       state.editingRelay = provider;
       form.elements.id.value = provider.id;
-      form.elements.apiKey.required = false;
-      form.elements.apiKey.placeholder = "留空则继续使用已加密保存的密钥";
+      applyApiKeyDisplay(form.elements.apiKey, provider.hasStoredKey);
     }
-    const route = await api.saveProviderRoute({
-      providerId: provider.id,
-      enabled: form.elements.failoverEnabled.checked,
-      fallbackProviderIds: [...state.routeFallbackDraft],
-      failureThreshold: form.elements.failureThreshold.value,
-      cooldownMs: Number(form.elements.cooldownSeconds.value) * 1000,
-    });
-    state.providerRoutes[provider.id] = route;
+    if (provider.type === "relay") {
+      const route = await api.saveProviderRoute({
+        providerId: provider.id,
+        enabled: form.elements.failoverEnabled.checked,
+        fallbackProviderIds: [...state.routeFallbackDraft],
+        failureThreshold: form.elements.failureThreshold.value,
+        cooldownMs: Number(form.elements.cooldownSeconds.value) * 1000,
+      });
+      state.providerRoutes[provider.id] = route;
+    }
     upsertProvider(provider);
     renderProviderOptions();
     form.reset();
     form.elements.id.value = "";
-    form.elements.apiKey.required = true;
-    form.elements.apiKey.placeholder = "仅加密保存在本机";
+    applyApiKeyDisplay(form.elements.apiKey, false);
     state.editingRelay = null;
     state.routeFallbackDraft = [];
     state.probedProviderModels = [];
@@ -6546,10 +7051,53 @@ $("#record-home-form").addEventListener("submit", async (event) => {
     button.disabled = false;
   }
 });
-$("#close-provider-button").addEventListener("click", () => {
-  if (state.connected) elements.overlay.classList.add("hidden");
+$("#conversation-mirror-choose").addEventListener("click", async () => {
+  try {
+    const selected = await api.chooseRecordHome($("#conversation-mirror-source").value || "");
+    if (selected) $("#conversation-mirror-source").value = selected;
+  } catch (error) {
+    $("#conversation-mirror-status").textContent = error.message;
+  }
 });
-window.addEventListener("synclattice:confirmation-decision", (event) => {
+$("#conversation-mirror-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = $("#conversation-mirror-status");
+  const submit = form.querySelector("button[type=submit]");
+  submit.disabled = true;
+  status.textContent = "正在保存副本设置…";
+  try {
+    const settings = await api.configureConversationMirror({
+      source: form.elements.source.value.trim(),
+      intervalSeconds: Number(form.elements.intervalSeconds.value),
+      enabled: form.elements.enabled.checked,
+    });
+    status.textContent = settings.enabled ? "已保存，按设定间隔单向复制到 ChatSwitch。" : "已保存，自动复制已暂停。";
+  } catch (error) {
+    status.textContent = error.message || "保存副本设置失败。";
+  } finally {
+    submit.disabled = false;
+  }
+});
+$("#conversation-mirror-now").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const status = $("#conversation-mirror-status");
+  button.disabled = true;
+  status.textContent = "正在复制 Codex 历史…";
+  try {
+    const result = await api.syncConversationMirrorNow();
+    status.textContent = `复制完成：新增 ${result.copied || 0} · 更新 ${result.updated || 0} · 跳过 ${result.skipped || 0}`;
+    await loadThreads();
+  } catch (error) {
+    status.textContent = error.message || "复制 Codex 历史失败。";
+  } finally {
+    button.disabled = false;
+  }
+});
+$("#close-provider-button").addEventListener("click", () => {
+  if (state.connected || state.activeThreads.length) elements.overlay.classList.add("hidden");
+});
+window.addEventListener("chatswitch:confirmation-decision", (event) => {
   closeActionConfirmation(Boolean(event.detail?.confirmed));
 });
 document.addEventListener("keydown", (event) => {
@@ -6563,6 +7111,7 @@ document.addEventListener("keydown", (event) => {
   else if (!elements.healthOverlay.classList.contains("hidden")) closeHealthDialog();
   else if (!elements.usageOverlay.classList.contains("hidden")) closeUsageDialog();
   else if (!elements.localHistoryOverlay.classList.contains("hidden")) closeLocalHistoryDialog();
+  else if (!elements.filePreviewOverlay.classList.contains("hidden")) closeFilePreview();
   else if (!elements.recordHomeOverlay.classList.contains("hidden")) closeRecordHomeDialog();
   else if (!elements.credentialOverlay.classList.contains("hidden")) closeCredentialDialog();
   else if (!$("#connection-overlay").classList.contains("hidden")) {
@@ -6624,11 +7173,15 @@ elements.chat.addEventListener("click", (event) => {
 elements.input.addEventListener("input", () => {
   scheduleComposerInputUpdate();
 });
+elements.webSearchInput.addEventListener("change", () => {
+  state.webSearchEnabled = elements.webSearchInput.checked;
+  showDiagnostic(state.webSearchEnabled ? "已请求本轮使用联网搜索；是否可用取决于当前模型供应商。" : "已关闭联网搜索请求。", false);
+});
 elements.input.addEventListener("paste", pasteClipboardAttachments);
 elements.attachButton.addEventListener("click", async () => {
   if (elements.attachButton.disabled) return;
   try {
-    addAttachments(await api.chooseImages());
+    addAttachments(await api.chooseFiles());
     elements.input.focus();
   } catch (error) {
     showActionError(error);
@@ -6821,6 +7374,7 @@ setInterval(() => {
     state.threadSettings = bootstrap.threadSettings || {};
     state.providerRoutes = bootstrap.providerRoutes || {};
     state.threadAliases = bootstrap.threadAliases || {};
+    state.threadDecorations = bootstrap.threadDecorations || {};
     state.hiddenThreadIds = new Set(bootstrap.hiddenThreadIds || []);
     state.deletedThreadIds = new Set(bootstrap.deletedThreadIds || []);
     state.localArchivedThreadIds = new Set(bootstrap.localArchivedThreadIds || []);
