@@ -2130,66 +2130,165 @@ export function render(_ctx, _cache) {
           id: "app-settings-form",
           class: "app-settings-form"
         }, [
-          _createElementVNode("label", { class: "settings-toggle-row" }, [
-            _createElementVNode("span", { class: "settings-toggle-icon" }, [
-              _createElementVNode("span", { "data-lucide": "power" })
-            ]),
-            _createElementVNode("span", null, [
-              _createElementVNode("strong", null, "Windows 登录时启动"),
-              _createElementVNode("small", null, "通过 ChatSwitch 启动脚本打开私有数据目录")
-            ]),
-            _createElementVNode("input", {
-              name: "launchAtLogin",
-              type: "checkbox"
-            })
-          ]),
-          _createElementVNode("label", { class: "settings-toggle-row" }, [
-            _createElementVNode("span", { class: "settings-toggle-icon" }, [
-              _createElementVNode("span", { "data-lucide": "panel-top-close" })
-            ]),
-            _createElementVNode("span", null, [
-              _createElementVNode("strong", null, "关闭窗口后留在托盘"),
-              _createElementVNode("small", null, "后台会话和已安排任务继续运行")
-            ]),
-            _createElementVNode("input", {
-              name: "closeToTray",
-              type: "checkbox",
-              checked: ""
-            })
-          ]),
-          _createElementVNode("section", {
-            class: "update-panel",
-            "aria-labelledby": "update-panel-title"
-          }, [
-            _createElementVNode("span", { class: "settings-toggle-icon update-icon" }, [
-              _createElementVNode("span", { "data-lucide": "git-compare-arrows" })
-            ]),
-            _createElementVNode("span", { class: "update-copy" }, [
-              _createElementVNode("strong", { id: "update-panel-title" }, "应用更新"),
-              _createElementVNode("small", { id: "update-status" }, "检查 GitHub Release，不会自动覆盖本地数据")
-            ]),
-            _createElementVNode("span", { class: "update-actions" }, [
-              _createElementVNode("button", {
-                id: "download-update-button",
-                class: "secondary-command hidden",
-                type: "button"
-              }, [
-                _createElementVNode("span", { "data-lucide": "external-link" }),
-                _createTextVNode("查看下载")
+          _createElementVNode("div", { class: "app-settings-scroll" }, [
+            _createElementVNode("label", { class: "settings-toggle-row" }, [
+              _createElementVNode("span", { class: "settings-toggle-icon" }, [
+                _createElementVNode("span", { "data-lucide": "power" })
               ]),
-              _createElementVNode("button", {
-                id: "check-update-button",
-                class: "secondary-command",
-                type: "button"
-              }, [
-                _createElementVNode("span", { "data-lucide": "refresh-cw" }),
-                _createTextVNode("检查更新")
-              ])
+              _createElementVNode("span", null, [
+                _createElementVNode("strong", null, "Windows 登录时启动"),
+                _createElementVNode("small", null, "通过 ChatSwitch 启动脚本打开私有数据目录")
+              ]),
+              _createElementVNode("input", {
+                name: "launchAtLogin",
+                type: "checkbox"
+              })
             ]),
-            _createElementVNode("span", {
-              id: "app-version",
-              class: "version-badge"
-            }, "v--")
+            _createElementVNode("label", { class: "settings-toggle-row" }, [
+              _createElementVNode("span", { class: "settings-toggle-icon" }, [
+                _createElementVNode("span", { "data-lucide": "panel-top-close" })
+              ]),
+              _createElementVNode("span", null, [
+                _createElementVNode("strong", null, "关闭窗口后留在托盘"),
+                _createElementVNode("small", null, "后台会话和已安排任务继续运行")
+              ]),
+              _createElementVNode("input", {
+                name: "closeToTray",
+                type: "checkbox",
+                checked: ""
+              })
+            ]),
+            _createElementVNode("section", {
+              class: "runtime-panel",
+              "aria-labelledby": "runtime-panel-title"
+            }, [
+              _createElementVNode("span", { class: "settings-toggle-icon runtime-icon" }, [
+                _createElementVNode("span", { "data-lucide": "cpu" })
+              ]),
+              _createElementVNode("div", { class: "runtime-copy" }, [
+                _createElementVNode("strong", { id: "runtime-panel-title" }, "OpenAI / Codex 运行环境"),
+                _createElementVNode("small", { id: "runtime-current-status" }, "正在检测运行环境...")
+              ]),
+              _createElementVNode("label", { class: "runtime-preference" }, [
+                _createElementVNode("span", null, "运行时偏好"),
+                _createElementVNode("select", {
+                  name: "codexRuntimePreference",
+                  "aria-describedby": "runtime-preference-help"
+                }, [
+                  _createElementVNode("option", { value: "auto" }, "自动选择"),
+                  _createElementVNode("option", { value: "external" }, "优先本机 Codex"),
+                  _createElementVNode("option", { value: "chatgpt-app" }, "优先 ChatGPT 应用"),
+                  _createElementVNode("option", { value: "bundled" }, "仅使用 ChatSwitch 内置")
+                ])
+              ]),
+              _createElementVNode("div", {
+                class: "runtime-capabilities",
+                id: "runtime-preference-help"
+              }, [
+                _createElementVNode("span", null, [
+                  _createElementVNode("b", null, "ChatSwitch 内置"),
+                  _createElementVNode("em", { id: "runtime-bundled-status" }, "检测中")
+                ]),
+                _createElementVNode("span", null, [
+                  _createElementVNode("b", null, "Codex CLI"),
+                  _createElementVNode("em", { id: "runtime-cli-status" }, "检测中")
+                ]),
+                _createElementVNode("span", null, [
+                  _createElementVNode("b", null, "ChatGPT 应用"),
+                  _createElementVNode("em", { id: "runtime-app-status" }, "检测中")
+                ])
+              ]),
+              _createElementVNode("div", {
+                class: "runtime-paths",
+                "aria-label": "自定义运行时路径"
+              }, [
+                _createElementVNode("label", null, [
+                  _createElementVNode("span", null, "Codex CLI 路径"),
+                  _createElementVNode("div", { class: "runtime-path-row" }, [
+                    _createElementVNode("input", {
+                      name: "codexCliPath",
+                      type: "text",
+                      placeholder: "留空则自动检测",
+                      autocomplete: "off",
+                      spellcheck: "false",
+                      "aria-describedby": "runtime-path-status"
+                    }),
+                    _createElementVNode("button", {
+                      id: "choose-codex-cli-button",
+                      class: "secondary-command",
+                      type: "button",
+                      title: "选择 Codex CLI 文件"
+                    }, [
+                      _createElementVNode("span", { "data-lucide": "folder-open" }),
+                      _createTextVNode("选择")
+                    ])
+                  ])
+                ]),
+                _createElementVNode("label", null, [
+                  _createElementVNode("span", null, "ChatGPT 应用路径"),
+                  _createElementVNode("div", { class: "runtime-path-row" }, [
+                    _createElementVNode("input", {
+                      name: "chatgptAppPath",
+                      type: "text",
+                      placeholder: "可选择 ChatGPT.exe 或 codex.exe",
+                      autocomplete: "off",
+                      spellcheck: "false",
+                      "aria-describedby": "runtime-path-status"
+                    }),
+                    _createElementVNode("button", {
+                      id: "choose-chatgpt-app-button",
+                      class: "secondary-command",
+                      type: "button",
+                      title: "选择 ChatGPT 应用文件"
+                    }, [
+                      _createElementVNode("span", { "data-lucide": "folder-open" }),
+                      _createTextVNode("选择")
+                    ])
+                  ])
+                ]),
+                _createElementVNode("small", {
+                  id: "runtime-path-status",
+                  class: "runtime-path-status",
+                  role: "status",
+                  "aria-live": "polite"
+                })
+              ]),
+              _createElementVNode("small", { class: "runtime-note" }, "没有外部运行时也可以使用普通聊天；本地命令、文件修改、MCP 和权限审批等能力需要 Codex 或 Claude Code 运行时。")
+            ]),
+            _createElementVNode("section", {
+              class: "update-panel",
+              "aria-labelledby": "update-panel-title"
+            }, [
+              _createElementVNode("span", { class: "settings-toggle-icon update-icon" }, [
+                _createElementVNode("span", { "data-lucide": "git-compare-arrows" })
+              ]),
+              _createElementVNode("span", { class: "update-copy" }, [
+                _createElementVNode("strong", { id: "update-panel-title" }, "应用更新"),
+                _createElementVNode("small", { id: "update-status" }, "检查 GitHub Release，不会自动覆盖本地数据")
+              ]),
+              _createElementVNode("span", { class: "update-actions" }, [
+                _createElementVNode("button", {
+                  id: "download-update-button",
+                  class: "secondary-command hidden",
+                  type: "button"
+                }, [
+                  _createElementVNode("span", { "data-lucide": "external-link" }),
+                  _createTextVNode("查看下载")
+                ]),
+                _createElementVNode("button", {
+                  id: "check-update-button",
+                  class: "secondary-command",
+                  type: "button"
+                }, [
+                  _createElementVNode("span", { "data-lucide": "refresh-cw" }),
+                  _createTextVNode("检查更新")
+                ])
+              ]),
+              _createElementVNode("span", {
+                id: "app-version",
+                class: "version-badge"
+              }, "v--")
+            ])
           ]),
           _createElementVNode("div", { class: "form-actions" }, [
             _createElementVNode("span", {

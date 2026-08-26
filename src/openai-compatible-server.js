@@ -39,6 +39,16 @@ function chatCompletionsEndpoint(baseUrl) {
   return parsed.toString();
 }
 
+function responsesEndpoint(baseUrl) {
+  const parsed = new URL(String(baseUrl || "").trim());
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("模型供应商 Base URL 无效。");
+  const normalized = parsed.pathname.replace(/\/+$/, "");
+  parsed.pathname = normalized.endsWith("/responses") ? normalized : `${normalized}/responses`;
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
 function textFromUserItem(item) {
   return (item?.content || [])
     .filter((part) => part?.type === "text")
@@ -113,6 +123,62 @@ function messagesForThread(thread, imageInputs = []) {
     }
   }
   return trimmed;
+}
+
+function responsesInput(messages) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: Array.isArray(message.content)
+      ? message.content.map((part) => {
+        if (part?.type === "text") return { type: "input_text", text: part.text || "" };
+        if (part?.type === "image_url") return { type: "input_image", image_url: part.image_url?.url || "" };
+        return part;
+      })
+      : message.content,
+  }));
+}
+
+function responseAnnotations(payload) {
+  const annotations = [];
+  for (const output of payload?.output || []) {
+    for (const content of output?.content || []) {
+      for (const annotation of content?.annotations || []) {
+        const url = String(annotation?.url || annotation?.url_citation?.url || "").trim();
+        if (!url) continue;
+        annotations.push({ url, title: String(annotation?.title || annotation?.url_citation?.title || url).trim() });
+      }
+    }
+  }
+  return annotations;
+}
+
+function responseOutput(payload) {
+  const result = { text: "", reasoning: "", query: "", annotations: responseAnnotations(payload) };
+  for (const output of payload?.output || []) {
+    if (output?.type === "message") {
+      for (const content of output.content || []) {
+        if (["output_text", "text"].includes(content?.type) && content.text) result.text += content.text;
+      }
+    } else if (output?.type === "reasoning") {
+      for (const summary of output.summary || []) result.reasoning += summary?.text || "";
+    } else if (output?.type === "web_search_call") {
+      result.query ||= String(output.action?.query || output.query || "");
+    }
+  }
+  result.text ||= String(payload?.output_text || "");
+  return result;
+}
+
+function appendCitations(text, annotations) {
+  const unique = [];
+  const seen = new Set();
+  for (const annotation of annotations || []) {
+    if (!annotation?.url || seen.has(annotation.url)) continue;
+    seen.add(annotation.url);
+    unique.push(annotation);
+  }
+  if (!unique.length) return "";
+  return `${text ? "\n\n" : ""}### 来源\n${unique.map((item, index) => `${index + 1}. [${item.title || item.url}](${item.url})`).join("\n")}`;
 }
 
 function jsonlFiles(directory) {
@@ -480,10 +546,23 @@ class OpenAICompatibleServer extends EventEmitter {
     return { imported: true, duplicate: false, thread: imported };
   }
 
-  createBranchThread(sourceThread, messageId) {
+  createBranchThread(sourceThread, messageId, options = {}) {
     const source = sourceThread && typeof sourceThread === "object" ? sourceThread : null;
-    const selectedId = String(messageId || "").trim();
+    let selectedId = String(messageId || "").trim();
     if (!source?.id || !selectedId) throw new Error("分支会话参数无效。");
+    const sourceItems = (source.turns || []).flatMap((turn) => turn.items || []);
+    if (!sourceItems.some((item) => String(item?.id || "") === selectedId)) {
+      const expectedRole = String(options.role || "").trim();
+      const expectedText = String(options.text || "");
+      const matches = expectedText ? sourceItems.filter((item) => {
+        const role = item?.type === "userMessage" ? "user" : item?.type === "agentMessage" ? "agent" : "";
+        const text = role === "user"
+          ? (item.content || []).filter((part) => part?.type === "text").map((part) => String(part.text || "")).join("\n")
+          : role === "agent" ? String(item.text || "") : "";
+        return text === expectedText && (!expectedRole || expectedRole === role);
+      }) : [];
+      if (matches.length === 1 && matches[0]?.id) selectedId = String(matches[0].id);
+    }
     const turns = [];
     let selected = false;
     for (const originalTurn of Array.isArray(source.turns) ? source.turns : []) {
@@ -549,7 +628,10 @@ class OpenAICompatibleServer extends EventEmitter {
 
   async listLocalThreads(searchTerm = "") {
     const query = String(searchTerm || "").trim().toLocaleLowerCase("zh-CN");
-    const data = fs.readdirSync(this.root, { withFileTypes: true })
+    const entries = fs.existsSync(this.root)
+      ? fs.readdirSync(this.root, { withFileTypes: true })
+      : [];
+    const data = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
       .map((entry) => readJson(path.join(this.root, entry.name)))
       .filter((thread) => thread?.id && Array.isArray(thread.turns))
@@ -589,7 +671,10 @@ class OpenAICompatibleServer extends EventEmitter {
 
   async listThreads(searchTerm = "", archived = false) {
     const query = String(searchTerm || "").trim().toLocaleLowerCase("zh-CN");
-    const local = archived ? [] : fs.readdirSync(this.root, { withFileTypes: true })
+    const entries = !archived && fs.existsSync(this.root)
+      ? fs.readdirSync(this.root, { withFileTypes: true })
+      : [];
+    const local = archived ? [] : entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
       .map((entry) => readJson(path.join(this.root, entry.name)))
       .filter((thread) => thread?.id && Array.isArray(thread.turns))
@@ -809,6 +894,9 @@ class OpenAICompatibleServer extends EventEmitter {
   }
 
   async executeProviderTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, controller) {
+    if ((provider.protocol || "chat_completions") === "responses") {
+      return this.executeResponsesTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, controller);
+    }
     const response = await this.fetchImpl(chatCompletionsEndpoint(provider.baseUrl), {
       method: "POST",
       headers: {
@@ -902,6 +990,116 @@ class OpenAICompatibleServer extends EventEmitter {
         `模型流式连接在完成标记前关闭${detail}。已保留当前内容，可点击“继续生成”。`,
         { requestId },
       );
+    }
+  }
+
+  async executeResponsesTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, controller) {
+    const response = await this.fetchImpl(responsesEndpoint(provider.baseUrl), {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${provider.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: responsesInput(messagesForThread(thread, imageInputs)),
+        stream: true,
+        store: false,
+        ...(turn.effort ? { reasoning: { effort: turn.effort } } : {}),
+        ...(turn.webSearch ? { tools: [{ type: "web_search_preview" }] } : {}),
+      }),
+      signal: controller.signal,
+    });
+    const requestId = providerRequestId(response);
+    if (requestId) turn.requestId = requestId;
+    if (!response.ok) throw responseError(response.status, response.statusText, await response.text());
+    const searchItem = turn.webSearch
+      ? { id: crypto.randomUUID(), type: "webSearch", query: "联网搜索", status: "inProgress" }
+      : null;
+    let searchStarted = false;
+    const startSearch = (query = "") => {
+      if (!searchItem) return;
+      if (query) searchItem.query = query;
+      if (searchStarted) return;
+      searchStarted = true;
+      this.emit("notification", { method: "item/started", params: { threadId: thread.id, turnId: turn.id, item: { ...searchItem } } });
+    };
+    const completeSearch = () => {
+      if (!searchItem || !searchStarted) return;
+      searchItem.status = "completed";
+      turn.items.push(searchItem);
+      this.emit("notification", { method: "item/completed", params: { threadId: thread.id, turnId: turn.id, item: { ...searchItem } } });
+    };
+    if (response.headers.get("content-type")?.includes("application/json")) {
+      const payload = await response.json();
+      if (payload?.usage && typeof payload.usage === "object") turn.usage = { ...payload.usage };
+      const output = responseOutput(payload);
+      if (output.query || turn.webSearch) startSearch(output.query);
+      if (output.reasoning) appendReasoningSummaryDelta(reasoningItem, output.reasoning);
+      assistantItem.text += output.text;
+      assistantItem.text += appendCitations(assistantItem.text, output.annotations);
+      completeSearch();
+      turn.finishReason = payload?.status || "completed";
+      if (!assistantItem.text && !reasoningItem.summary.length) throw emptyResponseError();
+      if (["failed", "incomplete", "cancelled"].includes(String(payload?.status || "").toLowerCase())) {
+        throw completionError("INCOMPLETE_RESPONSE", "模型 Responses 请求未完整完成。", { requestId, finishReason: payload.status });
+      }
+      return;
+    }
+    let completedResponse = null;
+    let failedResponse = null;
+    let streamResult;
+    try {
+      streamResult = await consumeSse(response, (event) => {
+        const type = String(event?.type || "");
+        if (type === "response.output_text.delta" && event.delta) {
+          assistantItem.text += event.delta;
+          this.emit("notification", {
+            method: "item/agentMessage/delta",
+            params: { threadId: thread.id, turnId: turn.id, itemId: assistantItem.id, delta: event.delta },
+          });
+        } else if (["response.reasoning_summary_text.delta", "response.reasoning_text.delta"].includes(type) && event.delta) {
+          appendReasoningSummaryDelta(reasoningItem, event.delta);
+          this.emit("notification", {
+            method: "item/reasoning/summaryTextDelta",
+            params: { threadId: thread.id, turnId: turn.id, itemId: reasoningItem.id, delta: event.delta },
+          });
+        } else if (type.includes("web_search")) {
+          startSearch(event.item?.action?.query || event.item?.query || event.query || "");
+        } else if (type === "response.completed") {
+          completedResponse = event.response || event;
+        } else if (["response.failed", "response.incomplete", "error"].includes(type)) {
+          failedResponse = event.response || event;
+        }
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw completionError(
+        "INCOMPLETE_STREAM",
+        `模型流式连接在完成前中断。已保留当前内容，可点击“继续生成”。${error?.message ? `（${error.message}）` : ""}`,
+        { requestId },
+      );
+    }
+    if (completedResponse?.usage && typeof completedResponse.usage === "object") turn.usage = { ...completedResponse.usage };
+    const output = responseOutput(completedResponse);
+    if (!assistantItem.text && output.text) assistantItem.text = output.text;
+    const citations = appendCitations(assistantItem.text, output.annotations);
+    if (citations) {
+      assistantItem.text += citations;
+      this.emit("notification", {
+        method: "item/agentMessage/delta",
+        params: { threadId: thread.id, turnId: turn.id, itemId: assistantItem.id, delta: citations },
+      });
+    }
+    completeSearch();
+    turn.finishReason = completedResponse?.status || null;
+    if (failedResponse || ["failed", "incomplete", "cancelled"].includes(String(turn.finishReason || "").toLowerCase())) {
+      throw completionError("INCOMPLETE_RESPONSE", "模型 Responses 请求未完整完成。", { requestId, finishReason: turn.finishReason });
+    }
+    if (!assistantItem.text && !reasoningItem.summary.length) throw emptyResponseError();
+    if (!completedResponse && !streamResult?.receivedDone) {
+      throw completionError("INCOMPLETE_STREAM", "模型流式连接在完成标记前关闭。已保留当前内容，可点击“继续生成”。", { requestId });
     }
   }
 
@@ -1017,6 +1215,8 @@ class OpenAICompatibleServer extends EventEmitter {
 module.exports = {
   OpenAICompatibleServer,
   chatCompletionsEndpoint,
+  responsesEndpoint,
+  responseOutput,
   consumeSse,
   messagesForThread,
   parseCodexThreadFile,

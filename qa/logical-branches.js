@@ -1,13 +1,14 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
+const os = require("node:os");
 const path = require("node:path");
 const { app, BrowserWindow } = require("electron");
 const { OpenAICompatibleServer } = require("../src/openai-compatible-server");
 
 const root = path.resolve(__dirname, "..");
-const storeRoot = fs.mkdtempSync(path.join(__dirname, ".logical-branch-store-"));
-const profileRoot = fs.mkdtempSync(path.join(__dirname, ".logical-branch-profile-"));
+const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-logical-branch-store-"));
+const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-logical-branch-profile-"));
 process.env.CHATSWITCH_STORE_ROOT = storeRoot;
 process.env.CHATSWITCH_QA = "1";
 app.setPath("userData", profileRoot);

@@ -39,12 +39,7 @@ function ensureWindowsNotificationIdentity(options = {}) {
 
   const programsDirectory = path.join(options.appData, ...START_MENU_PARTS);
   const shortcutPath = path.join(programsDirectory, "ChatSwitch.lnk");
-  const legacyShortcutPaths = [
-    path.join(programsDirectory, "ThreadLattice.lnk"),
-    path.join(programsDirectory, "Synclattice.lnk"),
-    path.join(programsDirectory, "Share Master.lnk"),
-    path.join(programsDirectory, "Electron.lnk"),
-  ];
+  const legacyShortcutPaths = [path.join(programsDirectory, "Electron.lnk")];
   fsApi.mkdirSync(programsDirectory, { recursive: true });
 
   const shortcut = {
@@ -67,19 +62,9 @@ function ensureWindowsNotificationIdentity(options = {}) {
     if (!fsApi.existsSync(legacyShortcutPath)) continue;
     try {
       const legacy = shellApi.readShortcutLink(legacyShortcutPath);
-      const oldProductAppId = new Set([
-        "com.synclattice.desktop",
-        "com.synclattice.desktop.dev",
-        "com.sharemaster.desktop",
-        "com.sharemaster.desktop.dev",
-        "com.threadlattice.desktop",
-        "com.threadlattice.desktop.dev",
-      ]).has(legacy?.appUserModelId);
       const matchesCurrentIdentity = legacy?.appUserModelId === options.appUserModelId
         && sameWindowsPath(legacy.target, options.target);
-      // Old product identities are unambiguously ours even when the executable
-      // path changed during an upgrade; a current identity still needs a path match.
-      if (oldProductAppId || matchesCurrentIdentity) {
+      if (matchesCurrentIdentity) {
         fsApi.unlinkSync(legacyShortcutPath);
         removedLegacy = true;
       }

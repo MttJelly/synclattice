@@ -22,23 +22,9 @@ const WINDOWS_PACKAGED_APP_ID = "com.chatswitch.desktop";
 const WINDOWS_APP_ID = app.isPackaged ? WINDOWS_PACKAGED_APP_ID : `${WINDOWS_PACKAGED_APP_ID}.dev`;
 const WINDOWS_TOAST_ACTIVATOR_CLSID = "{E6B8F4D5-4A0D-4B9F-8E3B-3C0F5C3E6D21}";
 app.setName("ChatSwitch");
-// Upgrade existing installations into the new Electron profile. Copying the
-// whole profile preserves the Windows safeStorage encryption context.
 if (app.isPackaged) {
   const appDataRoot = app.getPath("appData");
   const chatSwitchUserData = path.join(appDataRoot, "ChatSwitch");
-  if (!fs.existsSync(chatSwitchUserData)) {
-    const previousProfiles = ["Synclattice", "Share Master"]
-      .map((name) => path.join(appDataRoot, name));
-    const legacyUserData = previousProfiles.find((directory) => fs.existsSync(directory));
-    if (legacyUserData) {
-      try {
-        fs.cpSync(legacyUserData, chatSwitchUserData, { recursive: true, errorOnExist: false });
-      } catch (error) {
-        console.warn(`[migration] unable to copy previous profile: ${error.message}`);
-      }
-    }
-  }
   fs.mkdirSync(chatSwitchUserData, { recursive: true });
   app.setPath("userData", chatSwitchUserData);
 }
@@ -54,7 +40,7 @@ if (app.isPackaged) {
   process.env.CODEX_HOME = path.join(app.getPath("userData"), "data", "codex");
 }
 
-const { CodexServer, CODEX_EXE, CODEX_HOME } = require("./codex-server");
+const { CodexServer, CODEX_EXE, CODEX_HOME, detectCodexRuntimes } = require("./codex-server");
 const { ClaudeServer, CLAUDE_EXE, claudeAuthEnvironment, claudeAuthStatus } = require("./claude-server");
 const { OpenAICompatibleServer } = require("./openai-compatible-server");
 const { fetchClaudeModels, fetchClaudeModelsSafely } = require("./claude-models");
@@ -265,7 +251,7 @@ function registerApprovalRequest(server, message, mappedMessage, sender, send) {
   const spec = approvalNotificationSpec(mappedMessage);
   const notification = new Notification({
     id: `approval-${crypto.randomUUID()}`,
-    groupId: "threadlattice-approvals",
+    groupId: "chatswitch-approvals",
     groupTitle: "ChatSwitch 授权请求",
     title: spec.title,
     body: spec.body,
@@ -367,6 +353,14 @@ async function providerEnvironment() {
     ...(niubi ? { NIUBI_API_KEY: niubi } : {}),
     ...(hexuan ? { HEXUAN_API_KEY: hexuan } : {}),
   };
+}
+
+function qaProviderModels(provider, apiKey) {
+  if (process.env.CHATSWITCH_QA !== "1" || apiKey !== "qa-placeholder-not-a-secret") return null;
+  return [...new Set([
+    ...(Array.isArray(provider.discoveredModels) ? provider.discoveredModels : []),
+    provider.model,
+  ].map((model) => String(model || "").trim()).filter(Boolean))];
 }
 
 async function checkApplicationUpdate() {
@@ -1162,7 +1156,9 @@ async function rendererWindowSummary(window) {
     modelOptionCount: document.querySelector('#session-model').options.length,
     selectedModel: document.querySelector('#session-model').value,
     selectedEffort: document.querySelector('#session-effort').value,
-    modelDisabled: document.querySelector('#session-model').disabled
+    modelDisabled: document.querySelector('#session-model').disabled,
+    approvalModeDisabled: document.querySelector('#mode-badge').disabled,
+    approvalModeLabel: document.querySelector('#approval-mode-label').textContent.trim()
   })`);
 }
 
@@ -1229,6 +1225,18 @@ async function runMultiProviderWindowQa(firstWindow) {
       const summaries = await Promise.all([firstWindow, secondWindow].map(rendererWindowSummary));
       return summaries.every((summary) => summary.connection.includes("已连接"));
     }, 30000);
+    await secondWindow.webContents.executeJavaScript(`document.querySelector('#mode-badge').click()`);
+    await waitForQaStep("isolated approval menu opened", () => secondWindow.webContents.executeJavaScript(
+      `!document.querySelector('#approval-mode-menu').classList.contains('hidden')`,
+    ));
+    await secondWindow.webContents.executeJavaScript(`document.querySelector('[data-approval-mode="auto"]').click()`);
+    await waitForQaStep("isolated approval mode changed", () => secondWindow.webContents.executeJavaScript(
+      `document.querySelector('#approval-mode-label').textContent.trim() === '替我审批'`,
+    ));
+    await secondWindow.webContents.executeJavaScript(`document.querySelector('#mode-badge').click(); document.querySelector('[data-approval-mode="ask"]').click()`);
+    await waitForQaStep("isolated approval mode restored", () => secondWindow.webContents.executeJavaScript(
+      `document.querySelector('#approval-mode-label').textContent.trim() === '请求批准'`,
+    ));
 
     await firstWindow.webContents.executeJavaScript(`document.querySelector('#new-window-button').click()`);
     const unavailableWindow = await waitForQaStep("unavailable provider window creation", () => BrowserWindow.getAllWindows().find((item) => item !== firstWindow && item !== secondWindow));
@@ -1268,10 +1276,14 @@ async function runMultiProviderWindowQa(firstWindow) {
       claudeConfigurationReturn: true,
       recordHomeReturn: true,
       projectConfigurationReturn: true,
+      isolatedApprovalModeEditable: true,
       unavailableProviderError: unavailableSummary.relayApiKeyHelp,
       unavailableCredentialVisible: unavailableSummary.connectionConfigVisible,
       unavailableConnection: unavailableSummary.connection,
       internalProviders: windows.map((window) => servers.get(window.webContents.id)?.provider.id || null),
+      internalServerTypes: windows.map((window) => servers.get(window.webContents.id)?.constructor?.name || null),
+      internalChildProcesses: windows.map((window) => Boolean(servers.get(window.webContents.id)?.process)),
+      internalRuntimeKinds: windows.map((window) => servers.get(window.webContents.id)?.runtimeKind || null),
       windows: summaries,
     }));
   } catch (error) {
@@ -1414,7 +1426,7 @@ async function readBranchThread(server, providerId, branch) {
   return response.thread;
 }
 
-async function logicalBranchThreads(server, logicalId) {
+async function logicalBranchThreads(server, logicalId, overrides = new Map()) {
   const allBranches = providerStore.threadBranches()[logicalId] || {};
   const labels = new Map(providerStore.list().map((provider) => [provider.id, provider.connectionLabel || provider.label]));
   const entries = await Promise.all(Object.entries(allBranches).map(async ([providerId, branch]) => {
@@ -1422,7 +1434,7 @@ async function logicalBranchThreads(server, logicalId) {
       return {
         providerId,
         metadata: branch,
-        thread: await readBranchThread(server, providerId, branch),
+        thread: overrides.get(providerId) || await readBranchThread(server, providerId, branch),
         label: labels.get(providerId) || providerId,
       };
     } catch (error) {
@@ -1439,6 +1451,11 @@ async function sharedListThreads(server, searchTerm = "", archived = false) {
   const results = await Promise.all(historySources(server).map(async ({ engine, reader }) => {
     try {
       const response = await reader.listThreads(searchTerm, archived);
+      // Remember IDs returned by the active server so opening a native thread
+      // can resume it directly without an extra full history read.
+      if (reader === server) {
+        for (const thread of response.data || []) rememberNativeThread(server, thread.id);
+      }
       return (response.data || []).map((thread) => ({
         ...thread,
         _historyEngine: thread._historyEngine || engine,
@@ -1477,8 +1494,8 @@ async function sharedReadThread(server, threadId) {
   return assembleSharedThread(server, targetId, response);
 }
 
-async function assembleSharedThread(server, targetId, response) {
-  const branches = await logicalBranchThreads(server, targetId);
+async function assembleSharedThread(server, targetId, response, branchOverrides = new Map()) {
+  const branches = await logicalBranchThreads(server, targetId, branchOverrides);
   const merged = branches.length
     ? mergeLogicalThread(response.thread, branches, providerStore.threadTimeline(targetId))
     : { ...response.thread, _crossModelReadOnly: false };
@@ -1722,14 +1739,40 @@ async function resumeLogicalThread(server, payload = {}) {
   const logicalId = logicalThreadId(server, payload.threadId);
   const branch = branchForServer(server, logicalId);
   if (branch) {
-    await server.resumeThread(
+    const resumed = await server.resumeThread(
       branch.threadId,
       payload.cwd || null,
       payload.modelProvider || null,
       payload.model || null,
       { approvalMode: payload.approvalMode || "ask" },
     );
-    return sharedReadThread(server, logicalId);
+    const base = await readLogicalBaseThread(server, logicalId);
+    return assembleSharedThread(
+      server,
+      logicalId,
+      base,
+      new Map([[currentProviderId(server), resumed?.thread]]),
+    );
+  }
+  if (isRememberedNativeThread(server, logicalId)) {
+    try {
+      const response = await server.resumeThread(
+        logicalId,
+        payload.cwd || null,
+        payload.modelProvider || null,
+        payload.model || null,
+        { approvalMode: payload.approvalMode || "ask" },
+      );
+      rememberNativeThread(server, logicalId);
+      return assembleSharedThread(server, logicalId, {
+        ...response,
+        thread: { ...response.thread, _historyEngine: serverEngine(server) },
+        sourceEngine: serverEngine(server),
+      });
+    } catch {
+      // The listing can race with external cleanup. Fall back to the shared
+      // reader so the conversation remains available as read-only history.
+    }
   }
   const base = await readLogicalBaseThread(server, logicalId);
   if (threadIsNativeToServer(server, base.thread, base.sourceEngine)) {
@@ -1909,8 +1952,10 @@ async function steerLogicalTurn(server, payload = {}) {
 
 function publicStoreSnapshot() {
   const metadata = providerStore.metadata();
+  const appSettings = providerStore.appSettings();
   return {
     openaiRuntimeAvailable: Boolean(CODEX_EXE),
+    codexRuntimes: detectCodexRuntimes(appSettings.codexRuntimePaths, appSettings.codexRuntimePreference),
     providers: providerStore.list(),
     providerPresets: providerPresetCatalog(),
     projects: metadata.projects.map(({ id, label, root, createdAt }) => ({
@@ -2555,7 +2600,8 @@ app.whenReady().then(async () => {
     .filter(Boolean);
   skillSources = configuredSkillSources.length
     ? configuredSkillSources
-    : process.env.CHATSWITCH_STORE_ROOT && process.env.CHATSWITCH_QA_SCREENSHOT
+    : process.env.CHATSWITCH_STORE_ROOT
+      && (process.env.CHATSWITCH_QA === "1" || process.env.CHATSWITCH_QA_SCREENSHOT)
       ? []
       : [
       path.join(os.homedir(), ".agents", "skills"),
@@ -2600,13 +2646,22 @@ app.whenReady().then(async () => {
   }));
   ipcMain.handle("app:settings", () => ({
     ...providerStore.appSettings(),
+    codexRuntimes: (() => {
+      const settings = providerStore.appSettings();
+      return detectCodexRuntimes(settings.codexRuntimePaths, settings.codexRuntimePreference);
+    })(),
     launchAtLogin: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
     version: app.getVersion(),
   }));
   ipcMain.handle("app:save-settings", (_event, input = {}) => {
     const launchAtLogin = Boolean(input.launchAtLogin);
     app.setLoginItemSettings(loginItemOptions(launchAtLogin));
-    return { ...providerStore.saveAppSettings(input), launchAtLogin };
+    const saved = providerStore.saveAppSettings(input);
+    return {
+      ...saved,
+      codexRuntimes: detectCodexRuntimes(saved.codexRuntimePaths, saved.codexRuntimePreference),
+      launchAtLogin,
+    };
   });
   ipcMain.handle("app:check-update", () => checkApplicationUpdate());
   ipcMain.handle("local-history:sources", () => localHistoryReader.sources());
@@ -2798,6 +2853,15 @@ app.whenReady().then(async () => {
       title: "选择 ChatSwitch 同步目录",
       defaultPath: currentPath || undefined,
       properties: ["openDirectory", "createDirectory"],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+  ipcMain.handle("dialog:runtime-executable", async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(owner, {
+      title: "选择 Codex 或 ChatGPT 运行时文件",
+      properties: ["openFile"],
+      filters: [{ name: "Windows 可执行文件", extensions: ["exe"] }],
     });
     return result.canceled ? null : result.filePaths[0];
   });
@@ -3290,7 +3354,8 @@ app.whenReady().then(async () => {
       if (["api", "relay"].includes(provider.type)) {
         const apiKey = providerApiKey(provider, environment);
         try {
-          const models = await fetchOpenAIModels(provider.baseUrl, apiKey, net.fetch);
+          const models = qaProviderModels(provider, apiKey)
+            || await fetchOpenAIModels(provider.baseUrl, apiKey, net.fetch);
           if (provider.type === "relay") {
             providerStore.updateRelay({
               id: provider.id,
@@ -3304,7 +3369,7 @@ app.whenReady().then(async () => {
           }
           provider = providerStore.withModelCatalog(provider, models);
         } catch (error) {
-          if (provider.engine === "openai-compatible" && [401, 403].includes(error.status)) {
+          if ([401, 403].includes(error.status)) {
             throw new Error(`API Key 无效或没有模型权限：${error.message}`);
           }
           modelWarning = error.message;
@@ -3329,11 +3394,24 @@ app.whenReady().then(async () => {
           failover: route?.enabled ? route : null,
         };
       }
-      const server = provider.engine === "claude"
-        ? new ClaudeServer(serverProvider)
-        : provider.engine === "openai-compatible"
-          ? new OpenAICompatibleServer(serverProvider, net.fetch)
-          : new CodexServer(serverProvider, environment);
+      if (["official", "account"].includes(provider.type)) {
+        const appSettings = providerStore.appSettings();
+        serverProvider = {
+          ...serverProvider,
+          runtimePreference: appSettings.codexRuntimePreference,
+          runtimePaths: appSettings.codexRuntimePaths,
+        };
+      }
+      let server;
+      if (provider.engine === "claude") {
+        server = new ClaudeServer(serverProvider);
+      } else if (provider.engine === "openai-compatible") {
+        server = new OpenAICompatibleServer(serverProvider, net.fetch);
+      } else if (["official", "account"].includes(provider.type) || provider.engine === "codex-isolated") {
+        server = new CodexServer(serverProvider, environment);
+      } else {
+        throw new Error(`连接 ${provider.label || provider.id} 没有可用的运行引擎。`);
+      }
       const requestIsCurrent = () => !sender.isDestroyed()
         && connectionGenerations.get(senderId) === generation;
       if (!requestIsCurrent()) {
@@ -3484,7 +3562,17 @@ app.whenReady().then(async () => {
         ...response,
         data: (response.data || []).map((model) => {
           const profile = reasoningProfile(model.model || model.id);
-          if (profile) return { ...model, reasoningCapabilitiesVerified: true };
+          if (profile) {
+            return {
+              ...model,
+              defaultReasoningEffort: profile.defaultEffort,
+              supportedReasoningEfforts: profile.efforts.map((reasoningEffort) => ({
+                reasoningEffort,
+                description: "该模型已验证支持此推理强度。",
+              })),
+              reasoningCapabilitiesVerified: true,
+            };
+          }
           const declared = Array.isArray(model.supportedReasoningEfforts)
             ? model.supportedReasoningEfforts
             : [];
@@ -3591,7 +3679,10 @@ app.whenReady().then(async () => {
     const messageId = String(payload?.messageId || "").trim();
     if (!threadId || !messageId) throw new Error("请选择要分支的消息。");
     const source = await sharedReadThread(server, threadId);
-    const result = sharedHistoryReaders().compatible.createBranchThread(source.thread, messageId);
+    const result = sharedHistoryReaders().compatible.createBranchThread(source.thread, messageId, {
+      role: payload?.messageRole,
+      text: payload?.messageText,
+    });
     broadcastStoreSnapshot();
     return result;
   });

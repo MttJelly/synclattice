@@ -40,6 +40,18 @@ async function run() {
       },
     };
   });
+  ipcMain.handle("codex:list", (_event, query = {}) => ({
+    data: query.archived ? [] : [{
+      id: "listed-native-fixture",
+      name: "Listed native fixture",
+      cwd: root,
+      model: "gpt-fixture",
+      updatedAt: Date.now(),
+      recencyAt: Date.now(),
+    }],
+    nextCursor: null,
+    backwardsCursor: null,
+  }));
   ipcMain.handle("codex:read", (_event, threadId) => {
     readCalls += 1;
     return {
@@ -320,6 +332,15 @@ async function run() {
   })()`);
   assert.equal(resumeCalls, 1, "Active thread switching must call resume exactly once.");
   assert.equal(readCalls, 1, "Archived thread switching must call read exactly once.");
+  await window.webContents.executeJavaScript(`(async () => {
+    state.connected = true;
+    state.provider = 'fixture';
+    state.providerType = 'api';
+    state.providerEngine = 'codex';
+    state.modelProvider = 'fixture';
+    await loadThreads();
+    await openThread({ id: 'listed-native-fixture', name: 'Listed native fixture', cwd: ${JSON.stringify(root)} });
+  })()`);
   assert.equal(protocol.activeThreadId, "background-b");
   assert.equal(protocol.openingThread, false);
   assert.equal(protocol.composerDisabled, false);
@@ -334,6 +355,8 @@ async function run() {
   assert.equal(protocol.ghostRunTracked, false);
   assert.equal(protocol.queuedTurnStarted, true);
   assert.equal(startTurnCalls, 1);
+  assert.equal(resumeCalls, 2, "Listed native thread should resume without a duplicate read.");
+  assert.equal(readCalls, 1, "Listed native thread opening must not perform an extra full history read.");
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].body, "Background A 已完成");
   assert.doesNotMatch(JSON.stringify(notifications), /未命名会话/);

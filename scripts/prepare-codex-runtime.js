@@ -47,15 +47,37 @@ function runtimeRoots() {
     explicitDirectory,
     explicitFile ? path.dirname(explicitFile) : null,
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs", "OpenAI", "Codex", "bin") : null,
+    ...managedRuntimeRoots(),
     ...windowsAppResourceRoots(),
   ];
   return [...new Set(roots.map(existingDirectory).filter(Boolean))];
 }
 
-const sourceRoot = runtimeRoots()[0];
+function managedRuntimeRoots() {
+  if (process.platform !== "win32" || !process.env.LOCALAPPDATA) return [];
+  const root = path.join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin");
+  try {
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => right.name.localeCompare(left.name, undefined, { numeric: true }))
+      .map((entry) => path.join(root, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+const requiredRuntimeFiles = [
+  "codex.exe",
+  "codex-code-mode-host.exe",
+  "codex-command-runner.exe",
+  "codex-windows-sandbox-setup.exe",
+];
+const sourceRoot = runtimeRoots().find((root) => (
+  requiredRuntimeFiles.every((name) => existingFile(path.join(root, name)))
+));
 const sourceCodex = sourceRoot && existingFile(path.join(sourceRoot, "codex.exe"));
 if (!sourceCodex) {
-  throw new Error("没有找到可打包的 Codex app-server。请安装 ChatGPT/Codex 应用，或设置 CHATSWITCH_CODEX_RUNTIME。");
+  throw new Error(`没有找到完整的 Codex app-server。运行时必须包含：${requiredRuntimeFiles.join("、")}。`);
 }
 
 const runtimeFiles = fs.readdirSync(sourceRoot)
@@ -64,6 +86,11 @@ const runtimeFiles = fs.readdirSync(sourceRoot)
   .filter(existingFile);
 if (!runtimeFiles.some((file) => path.basename(file).toLowerCase() === "codex.exe")) {
   throw new Error(`运行时目录缺少 codex.exe：${sourceRoot}`);
+}
+for (const name of requiredRuntimeFiles) {
+  if (!runtimeFiles.some((file) => path.basename(file).toLowerCase() === name)) {
+    throw new Error(`运行时目录缺少 ${name}：${sourceRoot}`);
+  }
 }
 
 fs.rmSync(destination, { recursive: true, force: true });

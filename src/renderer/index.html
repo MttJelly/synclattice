@@ -545,6 +545,7 @@
           <button id="app-settings-close-button" class="icon-button dialog-close" type="button" title="关闭" aria-label="关闭"><span data-lucide="x"></span></button>
         </div>
         <form id="app-settings-form" class="app-settings-form">
+          <div class="app-settings-scroll">
           <label class="settings-toggle-row">
             <span class="settings-toggle-icon"><span data-lucide="power"></span></span>
             <span><strong>Windows 登录时启动</strong><small>通过 ChatSwitch 启动脚本打开私有数据目录</small></span>
@@ -555,6 +556,25 @@
             <span><strong>关闭窗口后留在托盘</strong><small>后台会话和已安排任务继续运行</small></span>
             <input name="closeToTray" type="checkbox" checked />
           </label>
+          <section class="runtime-panel" aria-labelledby="runtime-panel-title">
+            <span class="settings-toggle-icon runtime-icon"><span data-lucide="cpu"></span></span>
+            <div class="runtime-copy">
+              <strong id="runtime-panel-title">OpenAI / Codex 运行环境</strong>
+              <small id="runtime-current-status">正在检测运行环境...</small>
+            </div>
+            <label class="runtime-preference"><span>运行时偏好</span><select name="codexRuntimePreference" aria-describedby="runtime-preference-help"><option value="auto">自动选择</option><option value="external">优先本机 Codex</option><option value="chatgpt-app">优先 ChatGPT 应用</option><option value="bundled">仅使用 ChatSwitch 内置</option></select></label>
+            <div class="runtime-capabilities" id="runtime-preference-help">
+              <span><b>ChatSwitch 内置</b><em id="runtime-bundled-status">检测中</em></span>
+              <span><b>Codex CLI</b><em id="runtime-cli-status">检测中</em></span>
+              <span><b>ChatGPT 应用</b><em id="runtime-app-status">检测中</em></span>
+            </div>
+            <div class="runtime-paths" aria-label="自定义运行时路径">
+              <label><span>Codex CLI 路径</span><div class="runtime-path-row"><input name="codexCliPath" type="text" placeholder="留空则自动检测" autocomplete="off" spellcheck="false" aria-describedby="runtime-path-status" /><button id="choose-codex-cli-button" class="secondary-command" type="button" title="选择 Codex CLI 文件"><span data-lucide="folder-open"></span>选择</button></div></label>
+              <label><span>ChatGPT 应用路径</span><div class="runtime-path-row"><input name="chatgptAppPath" type="text" placeholder="可选择 ChatGPT.exe 或 codex.exe" autocomplete="off" spellcheck="false" aria-describedby="runtime-path-status" /><button id="choose-chatgpt-app-button" class="secondary-command" type="button" title="选择 ChatGPT 应用文件"><span data-lucide="folder-open"></span>选择</button></div></label>
+              <small id="runtime-path-status" class="runtime-path-status" role="status" aria-live="polite"></small>
+            </div>
+            <small class="runtime-note">没有外部运行时也可以使用普通聊天；本地命令、文件修改、MCP 和权限审批等能力需要 Codex 或 Claude Code 运行时。</small>
+          </section>
           <section class="update-panel" aria-labelledby="update-panel-title">
             <span class="settings-toggle-icon update-icon"><span data-lucide="git-compare-arrows"></span></span>
             <span class="update-copy"><strong id="update-panel-title">应用更新</strong><small id="update-status">检查 GitHub Release，不会自动覆盖本地数据</small></span>
@@ -564,6 +584,7 @@
             </span>
             <span id="app-version" class="version-badge">v--</span>
           </section>
+          </div>
           <div class="form-actions"><span id="app-settings-status" class="provider-error"></span><button class="primary-command" type="submit"><span data-lucide="save"></span>保存设置</button></div>
         </form>
       </section>

@@ -68,11 +68,13 @@ async function run() {
     directResponse.error = error.cause?.code || error.message;
   }
 
-  const server = new CodexServer(provider, {});
+  const server = new CodexServer(provider);
   const diagnostics = [];
   let agentText = "";
   let turnStatus = null;
   let startedThread = null;
+  let runtimeKind = null;
+  let codexChildProcess = false;
   const threadSettings = [];
   const reroutes = [];
   server.on("diagnostic", (message) => diagnostics.push(message));
@@ -84,23 +86,11 @@ async function run() {
       agentText = item.text;
     }
   });
-  server.on("server-request", (request) => {
-    if (request.method === "currentTime/read") {
-      server.respond(request.id, { currentTimeAt: Math.floor(Date.now() / 1000) });
-    } else {
-      server.respondError(request.id, -32601, `Niubi live test does not support ${request.method}.`);
-    }
-  });
   try {
     await server.start();
-    const started = await server.request("thread/start", {
-      cwd: process.cwd(),
-      approvalPolicy: "never",
-      sandbox: "read-only",
-      personality: "pragmatic",
-      ephemeral: true,
-      sessionStartSource: "startup",
-    }, 90000);
+    runtimeKind = server.runtimeKind;
+    codexChildProcess = Boolean(server.process);
+    const started = await server.startThread(process.cwd(), provider.model);
     startedThread = started.thread;
     const completion = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Niubi turn timed out.")), 90000);
@@ -112,14 +102,13 @@ async function run() {
       };
       server.on("notification", onNotification);
     });
-    await server.request("turn/start", {
-      threadId: started.thread.id,
-      cwd: process.cwd(),
-      approvalPolicy: "never",
-      personality: "pragmatic",
-      clientUserMessageId: crypto.randomUUID(),
-      input: [{ type: "text", text: "Reply with exactly NIUBI_OK and nothing else. Do not use tools." }],
-    }, 90000);
+    await server.startTurn(
+      started.thread.id,
+      "Reply with exactly NIUBI_OK and nothing else. Do not use tools.",
+      process.cwd(),
+      crypto.randomUUID(),
+      { model: provider.model, effort: "low" },
+    );
     const turn = await completion;
     turnStatus = turn.status;
   } finally {
@@ -130,7 +119,9 @@ async function run() {
   assert.equal(directResponse.created, true, `Niubi Responses API failed: ${directResponse.error}`);
   assert.equal(balance.supported, true, `Niubi balance lookup failed: ${balance.message}`);
   assert.equal(balance.unlimited, false, "A numeric Niubi account balance must not be shown as unlimited.");
-  assert.equal(startedThread?.modelProvider, "niubi", "Codex app-server used an unexpected model provider.");
+  assert.equal(startedThread?.modelProvider, "niubi", "Isolated runtime used an unexpected model provider.");
+  assert.equal(codexChildProcess, true, "Niubi must start the isolated ChatSwitch runtime.");
+  assert.equal(runtimeKind, "chatswitch-bundled");
   assert.equal(turnStatus, "completed");
   assert.equal(agentText.trim(), "NIUBI_OK");
 
@@ -154,8 +145,10 @@ async function run() {
       unlimited: balance.unlimited,
       expiresAt: balance.expiresAt,
     } : { supported: false, status: balance.status, message: balance.message },
-    appServerInitialized: true,
-    appServerThread: startedThread ? {
+    isolatedRuntimeInitialized: true,
+    codexChildProcess,
+    runtimeKind,
+    isolatedRuntimeThread: startedThread ? {
       model: startedThread.model,
       modelProvider: startedThread.modelProvider,
     } : null,

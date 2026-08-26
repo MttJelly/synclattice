@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain } = require("electron");
 const { APP_VERSION } = require("../src/app-version");
@@ -27,7 +28,13 @@ const skillInstallScreenshot = path.join(artifactRoot, "vue-renderer-skill-insta
 const darkExtensionsScreenshot = path.join(artifactRoot, "vue-renderer-extensions-dark.png");
 const confirmationScreenshot = path.join(artifactRoot, "vue-renderer-confirmation.png");
 const interactiveLayoutAudits = [];
-app.setPath("userData", path.join(__dirname, ".vue-renderer-profile"));
+const profileRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-vue-renderer-profile-"));
+app.setPath("userData", profileRoot);
+const cleanupProfile = () => {
+  try { fs.rmSync(profileRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+};
+app.once("quit", cleanupProfile);
+process.once("exit", cleanupProfile);
 
 async function rendererSnapshot(window) {
   return window.webContents.executeJavaScript(`(() => {
@@ -74,21 +81,33 @@ async function capturePageWithRetry(window) {
     }));
   })`);
   interactiveLayoutAudits.push(await window.webContents.executeJavaScript(`(() => {
-    const visible = (node) => {
-      const rect = node.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return false;
+    const visibleRect = (node) => {
+      const source = node.getBoundingClientRect();
+      let rect = {
+        left: Math.max(0, source.left),
+        top: Math.max(0, source.top),
+        right: Math.min(window.innerWidth, source.right),
+        bottom: Math.min(window.innerHeight, source.bottom),
+      };
       for (let current = node; current; current = current.parentElement) {
         const style = getComputedStyle(current);
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) <= 0) return false;
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) <= 0) return null;
+        if (current !== node && /(auto|scroll|hidden|clip)/.test(style.overflow + style.overflowX + style.overflowY)) {
+          const clip = current.getBoundingClientRect();
+          rect.left = Math.max(rect.left, clip.left);
+          rect.top = Math.max(rect.top, clip.top);
+          rect.right = Math.min(rect.right, clip.right);
+          rect.bottom = Math.min(rect.bottom, clip.bottom);
+        }
       }
-      return true;
+      return rect.right - rect.left > 1 && rect.bottom - rect.top > 1 ? rect : null;
     };
-    const overlays = [...document.querySelectorAll('.overlay:not(.hidden)')].filter(visible);
+    const overlays = [...document.querySelectorAll('.overlay:not(.hidden)')].filter((node) => visibleRect(node));
     const scope = overlays.at(-1) || document;
     const controls = [...new Set(scope.querySelectorAll('button, input, select, textarea, a[href], [role="button"]'))]
-      .filter(visible)
-      .map((node) => {
-        const rect = node.getBoundingClientRect();
+      .map((node) => ({ node, rect: visibleRect(node) }))
+      .filter(({ rect }) => rect)
+      .map(({ node, rect }) => {
         return {
           node,
           rect,
@@ -196,6 +215,17 @@ async function run() {
       { id: "deepseek-fixture", type: "relay", brand: "openai", preset: "deepseek", protocol: "chat_completions", label: "DeepSeek", connectionLabel: "DeepSeek", model: "deepseek-chat", baseUrl: "https://api.deepseek.com/v1", deletable: true, hasStoredKey: true },
       { id: "qwen-fixture", type: "relay", brand: "openai", preset: "qwen", protocol: "chat_completions", label: "Qwen", connectionLabel: "Qwen", model: "qwen-plus", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", deletable: true, hasStoredKey: true },
     ],
+    codexRuntimes: {
+      bundledAvailable: true,
+      externalAvailable: true,
+      codexCliAvailable: true,
+      chatgptAppAvailable: false,
+      automaticRuntime: "codex-cli",
+      selectedExternalRuntime: "codex-cli",
+      selectedRuntime: "codex-cli",
+      selectionFallback: false,
+      runtimePathWarnings: {},
+    },
     projects: [],
     projectThreads: {},
     hiddenProjectRoots: [],
@@ -479,7 +509,23 @@ async function run() {
     result: { status: "success", direction: mode === "pull" ? "pull" : "push", message: "同步完成。" },
     conflict: false,
   }));
-  ipcMain.handle("app:settings", () => ({ launchAtLogin: false, closeToTray: true, version: APP_VERSION }));
+  ipcMain.handle("app:settings", () => ({
+    launchAtLogin: false,
+    closeToTray: true,
+    codexRuntimePreference: "auto",
+    codexRuntimes: {
+      bundledAvailable: true,
+      externalAvailable: true,
+      codexCliAvailable: true,
+      chatgptAppAvailable: false,
+      automaticRuntime: "codex-cli",
+      selectedExternalRuntime: "codex-cli",
+      selectedRuntime: "codex-cli",
+      selectionFallback: false,
+      runtimePathWarnings: {},
+    },
+    version: APP_VERSION,
+  }));
   ipcMain.handle("app:save-settings", (_event, input) => ({ ...input }));
   ipcMain.handle("app:check-update", () => ({
     status: "available",
@@ -1580,6 +1626,13 @@ async function run() {
     visible: !document.querySelector('#app-settings-overlay').classList.contains('hidden'),
     toggles: document.querySelectorAll('#app-settings-form input[type="checkbox"]').length,
     closeToTray: document.querySelector('#app-settings-form [name="closeToTray"]').checked,
+    runtimePreference: document.querySelector('#app-settings-form [name="codexRuntimePreference"]').value,
+    runtimeOptions: [...document.querySelectorAll('#app-settings-form [name="codexRuntimePreference"] option')].map((node) => node.value),
+    runtimePathInputs: document.querySelectorAll('#app-settings-form .runtime-path-row input').length,
+    runtimePathButtons: document.querySelectorAll('#app-settings-form .runtime-path-row button').length,
+    runtimePathStatus: document.querySelector('#runtime-path-status').textContent,
+    runtimeCurrent: document.querySelector('#runtime-current-status').textContent,
+    runtimeStatuses: [...document.querySelectorAll('.runtime-capabilities em')].map((node) => node.textContent),
     bodyOverflow: document.body.scrollWidth > document.body.clientWidth || document.body.scrollHeight > document.body.clientHeight
   }))()`);
   Object.assign(appSettings, await window.webContents.executeJavaScript(`(async () => {
@@ -2085,6 +2138,13 @@ async function run() {
   assert.deepEqual(sync.selectedTabs, ["false", "true"]);
   assert.match(sync.description, /不包含 API Key、MCP 密钥或聊天正文/);
   assert.deepEqual({ visible: appSettings.visible, toggles: appSettings.toggles, closeToTray: appSettings.closeToTray }, { visible: true, toggles: 2, closeToTray: true });
+  assert.equal(appSettings.runtimePreference, "auto");
+  assert.deepEqual(appSettings.runtimeOptions, ["auto", "external", "chatgpt-app", "bundled"]);
+  assert.equal(appSettings.runtimePathInputs, 2);
+  assert.equal(appSettings.runtimePathButtons, 2);
+  assert.equal(appSettings.runtimePathStatus, "");
+  assert.match(appSettings.runtimeCurrent, /Codex CLI/);
+  assert.deepEqual(appSettings.runtimeStatuses, ["可用", "可用", "未检测到"]);
   assert.equal(appSettings.bodyOverflow, false);
   assert.equal(appSettings.updateState, "available");
   assert.match(appSettings.updateMessage, /v0\.2\.0/);

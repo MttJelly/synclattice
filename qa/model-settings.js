@@ -1,13 +1,14 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const electron = require("electron");
 const { CODEX_HOME } = require("../src/codex-server");
 
 const root = path.resolve(__dirname, "..");
-const profile = path.join(__dirname, ".model-settings-profile");
-const store = path.join(__dirname, ".model-settings-store");
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-model-settings-profile-"));
+const store = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-model-settings-store-"));
 const screenshot = path.join(__dirname, "multi-window-artifacts", "model-settings.png");
 
 function jsonlFiles(directory) {
@@ -29,7 +30,6 @@ const before = {
   archived: jsonlFiles(path.join(CODEX_HOME, "archived_sessions")),
 };
 
-fs.rmSync(store, { recursive: true, force: true });
 const modelFixtureSource = before.active[0] || before.archived[0];
 if (!modelFixtureSource) throw new Error("Model settings QA requires one existing read-only conversation fixture.");
 const modelFixtureTarget = path.join(store, "conversations", "sessions", "qa", path.basename(modelFixtureSource));
@@ -83,4 +83,5 @@ try {
   }));
 } finally {
   fs.rmSync(store, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
 }

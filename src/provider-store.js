@@ -5,16 +5,12 @@ const crypto = require("node:crypto");
 const { safeStorage } = require("electron");
 const { CODEX_HOME, BASE_PROVIDERS } = require("./codex-server");
 
-// Keep the legacy directory so existing providers, projects, and hidden-thread state remain available.
 const STORE_ROOT = process.env.CHATSWITCH_STORE_ROOT || path.join(CODEX_HOME, "chatswitch");
 const METADATA_FILE = path.join(STORE_ROOT, "providers.json");
 const SECRETS_FILE = path.join(STORE_ROOT, "credentials.json");
 const CONFIG_SCHEMA = "chatswitch-config";
-const LEGACY_CONFIG_SCHEMAS = new Set([CONFIG_SCHEMA, "share-master-config"]);
 const BACKUP_SCHEMA = "chatswitch-backup";
-const LEGACY_BACKUP_SCHEMAS = new Set([BACKUP_SCHEMA, "share-master-backup"]);
 const SYNC_FILE_NAME = "chatswitch-sync.json";
-const LEGACY_SYNC_FILE_NAME = "share-master-sync.json";
 const ISOLATED_STORE = Boolean(process.env.CHATSWITCH_STORE_ROOT);
 const DEFAULT_CONVERSATION_HOME = ISOLATED_STORE
   ? path.join(STORE_ROOT, "conversations")
@@ -759,7 +755,7 @@ class ProviderStore {
     const secrets = readJson(SECRETS_FILE, {});
     const configuredBuiltin = (id) => (id === "official"
       ? Boolean(secrets[`builtin:${id}`]) || metadata.providerOrder.includes(id)
-        || (fs.existsSync(METADATA_FILE) && fs.existsSync(path.join(CODEX_HOME, "auth.json")))
+        || (!ISOLATED_STORE && fs.existsSync(METADATA_FILE) && fs.existsSync(path.join(CODEX_HOME, "auth.json")))
         || process.env.CHATSWITCH_QA === "1"
       : Boolean(secrets[`builtin:${id}`]) || process.env.CHATSWITCH_QA === "1")
       || metadata.providerOrder.includes(id)
@@ -1309,7 +1305,7 @@ class ProviderStore {
   }
 
   importConfiguration(bundle) {
-    if (!bundle || !LEGACY_CONFIG_SCHEMAS.has(bundle.schema) || Number(bundle.version) !== 1) {
+    if (!bundle || bundle.schema !== CONFIG_SCHEMA || Number(bundle.version) !== 1) {
       throw new Error("不是有效的 ChatSwitch 配置文件。");
     }
     const metadata = this.metadata();
@@ -1486,7 +1482,7 @@ class ProviderStore {
     const backupRoot = path.join(STORE_ROOT, "backups");
     fs.mkdirSync(backupRoot, { recursive: true });
     const existing = fs.readdirSync(backupRoot)
-      .filter((name) => /^(?:chatswitch|share-master)-backup-.*\.json$/i.test(name))
+      .filter((name) => /^chatswitch-backup-.*\.json$/i.test(name))
       .map((name) => ({ name, file: path.join(backupRoot, name), stat: fs.statSync(path.join(backupRoot, name)) }))
       .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs);
     if (existing[0] && Date.now() - existing[0].stat.mtimeMs < Math.max(0, minimumIntervalMs)) {
@@ -1514,7 +1510,7 @@ class ProviderStore {
     const backupRoot = path.join(STORE_ROOT, "backups");
     if (!fs.existsSync(backupRoot)) return [];
     return fs.readdirSync(backupRoot)
-      .filter((name) => /^(?:chatswitch|share-master)-backup-.*\.json$/i.test(name))
+      .filter((name) => /^chatswitch-backup-.*\.json$/i.test(name))
       .map((name) => {
         const stat = fs.statSync(path.join(backupRoot, name));
         return { name, createdAt: stat.mtimeMs, size: stat.size };
@@ -1527,7 +1523,7 @@ class ProviderStore {
     const file = path.resolve(backupRoot, path.basename(String(name || "")));
     if (path.dirname(file) !== backupRoot || !fs.existsSync(file)) throw new Error("备份不存在。");
     const backup = readJson(file, null);
-    if (!backup || !LEGACY_BACKUP_SCHEMAS.has(backup.schema) || Number(backup.version) !== 1
+    if (!backup || backup.schema !== BACKUP_SCHEMA || Number(backup.version) !== 1
       || !backup.metadata || typeof backup.encryptedCredentials !== "object") {
       throw new Error("备份文件无效或已损坏。");
     }
@@ -1542,9 +1538,7 @@ class ProviderStore {
     const settings = metadata.syncSettings || {};
     const backend = settings.backend === "webdav" ? "webdav" : "directory";
     const directory = typeof settings.directory === "string" ? settings.directory : null;
-    const syncFiles = directory
-      ? [SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME].map((name) => path.join(directory, name))
-      : [];
+    const syncFiles = directory ? [path.join(directory, SYNC_FILE_NAME)] : [];
     const secrets = readJson(SECRETS_FILE, {});
     return {
       backend,
@@ -1562,12 +1556,40 @@ class ProviderStore {
 
   appSettings() {
     const settings = this.metadata().appSettings || {};
-    return { closeToTray: settings.closeToTray !== false };
+    const codexRuntimePreference = ["auto", "external", "chatgpt-app", "bundled"].includes(settings.codexRuntimePreference)
+      ? settings.codexRuntimePreference
+      : "auto";
+    const runtimePaths = settings.codexRuntimePaths && typeof settings.codexRuntimePaths === "object"
+      ? settings.codexRuntimePaths
+      : {};
+    return {
+      closeToTray: settings.closeToTray !== false,
+      codexRuntimePreference,
+      codexRuntimePaths: {
+        codexCliPath: typeof runtimePaths.codexCliPath === "string" ? runtimePaths.codexCliPath : "",
+        chatgptAppPath: typeof runtimePaths.chatgptAppPath === "string" ? runtimePaths.chatgptAppPath : "",
+      },
+    };
   }
 
   saveAppSettings(input = {}) {
     const metadata = this.metadata();
-    metadata.appSettings = { closeToTray: input.closeToTray !== false };
+    const existingPaths = metadata.appSettings?.codexRuntimePaths && typeof metadata.appSettings.codexRuntimePaths === "object"
+      ? metadata.appSettings.codexRuntimePaths
+      : {};
+    const suppliedPaths = input.codexRuntimePaths && typeof input.codexRuntimePaths === "object"
+      ? input.codexRuntimePaths
+      : existingPaths;
+    metadata.appSettings = {
+      closeToTray: input.closeToTray !== false,
+      codexRuntimePreference: ["auto", "external", "chatgpt-app", "bundled"].includes(input.codexRuntimePreference)
+        ? input.codexRuntimePreference
+        : "auto",
+      codexRuntimePaths: {
+        codexCliPath: typeof suppliedPaths.codexCliPath === "string" ? suppliedPaths.codexCliPath.trim() : "",
+        chatgptAppPath: typeof suppliedPaths.chatgptAppPath === "string" ? suppliedPaths.chatgptAppPath.trim() : "",
+      },
+    };
     writeJson(METADATA_FILE, metadata);
     return this.appSettings();
   }
@@ -1669,7 +1691,6 @@ class ProviderStore {
     const credentials = this.webdavCredentials();
     if (!credentials) throw new Error("WebDAV 凭据不可用，请重新输入。");
     const target = new URL(SYNC_FILE_NAME, settings.webdavUrl).toString();
-    const legacyTarget = new URL(LEGACY_SYNC_FILE_NAME, settings.webdavUrl).toString();
     const authorization = `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`, "utf8").toString("base64")}`;
     const request = async (requestTarget, method, body = undefined) => {
       const response = await fetchImpl(requestTarget, {
@@ -1687,8 +1708,7 @@ class ProviderStore {
 
     const localBundle = this.exportConfiguration();
     const localHash = configurationHash(localBundle);
-    let response = await request(target, "GET");
-    if (response.status === 404) response = await request(legacyTarget, "GET");
+    const response = await request(target, "GET");
     let remoteBundle = null;
     let remoteHash = null;
     if (response.status !== 404) {
@@ -1697,7 +1717,7 @@ class ProviderStore {
       } catch {
         throw new Error("WebDAV 中的同步文件不是有效 JSON。");
       }
-      if (!LEGACY_CONFIG_SCHEMAS.has(remoteBundle?.schema) || Number(remoteBundle.version) !== 1) {
+      if (remoteBundle?.schema !== CONFIG_SCHEMA || Number(remoteBundle.version) !== 1) {
         throw new Error("WebDAV 中的同步文件无效或已损坏。");
       }
       remoteHash = configurationHash(remoteBundle);
@@ -1745,9 +1765,7 @@ class ProviderStore {
     const settings = metadata.syncSettings || {};
     if (!settings.directory) throw new Error("请先选择同步目录。");
     const directory = path.resolve(settings.directory);
-    const currentFile = path.join(directory, SYNC_FILE_NAME);
-    const legacyFile = path.join(directory, LEGACY_SYNC_FILE_NAME);
-    const file = fs.existsSync(currentFile) || !fs.existsSync(legacyFile) ? currentFile : legacyFile;
+    const file = path.join(directory, SYNC_FILE_NAME);
     fs.mkdirSync(directory, { recursive: true });
 
     const localBundle = this.exportConfiguration();
@@ -1756,7 +1774,7 @@ class ProviderStore {
     let remoteHash = null;
     if (fs.existsSync(file)) {
       remoteBundle = readJson(file, null);
-      if (!remoteBundle || !LEGACY_CONFIG_SCHEMAS.has(remoteBundle.schema) || Number(remoteBundle.version) !== 1) {
+      if (!remoteBundle || remoteBundle.schema !== CONFIG_SCHEMA || Number(remoteBundle.version) !== 1) {
         throw new Error("同步目录中的配置文件无效或已损坏。");
       }
       remoteHash = configurationHash(remoteBundle);
@@ -1784,12 +1802,12 @@ class ProviderStore {
       this.createRotatingBackup(10, 0);
       imported = this.importConfiguration(remoteBundle);
       const mergedBundle = { ...this.exportConfiguration(), exportedAt: new Date().toISOString() };
-      writeJson(currentFile, mergedBundle);
+      writeJson(file, mergedBundle);
       syncedHash = configurationHash(mergedBundle);
       direction = "pull";
     } else if (mode === "push") {
       const payload = { ...localBundle, exportedAt: new Date().toISOString() };
-      writeJson(currentFile, payload);
+      writeJson(file, payload);
       syncedHash = configurationHash(payload);
       direction = "push";
     }
@@ -2710,7 +2728,10 @@ class ProviderStore {
         });
       }
       const storedKey = this.decryptStoredProviderKey(id);
-      if (storedKey && provider.envKey) provider.env = { [provider.envKey]: storedKey };
+      if (storedKey && provider.envKey) {
+        provider.env = { [provider.envKey]: storedKey };
+        provider.apiKey = storedKey;
+      }
       return this.withMcpConfiguration(provider);
     }
     const metadata = this.metadata();
@@ -2729,10 +2750,12 @@ class ProviderStore {
           codexHome: conversationHome,
         };
       }
-      const catalog = providerModelCatalog(relay.id, relay.model);
+      const catalog = providerModelCatalog(relay.id, relay.model, relay.discoveredModels || [relay.model]);
       return this.withMcpConfiguration({
         ...relay,
         type: "relay",
+        engine: "codex-isolated",
+        bundledRuntimeOnly: true,
         modelProvider: relay.id,
         envKey: "CHATSWITCH_RELAY_API_KEY",
         balanceType: "auto",
@@ -2740,6 +2763,7 @@ class ProviderStore {
           "-c", `model_provider=${JSON.stringify(relay.id)}`,
           "-c", `model=${JSON.stringify(relay.model)}`,
           "-c", `model_catalog_json=${JSON.stringify(catalog)}`,
+          "-c", "disable_response_storage=true",
           "-c", "features.apps=false",
           "-c", "features.remote_plugin=false",
           "-c", `model_providers.${relay.id}.name=${JSON.stringify(relay.label)}`,
@@ -2813,7 +2837,8 @@ class ProviderStore {
     if (provider.engine === "openai-compatible") {
       return {
         ...provider,
-        discoveredModels: [...new Set([provider.model, ...discoveredModels].filter(Boolean))],
+        model: effectiveModel,
+        discoveredModels,
       };
     }
     if (!Array.isArray(provider.args)) return provider;

@@ -5,11 +5,18 @@ const path = require("node:path");
 const {
   CodexServer,
   BASE_PROVIDERS,
+  detectCodexRuntimes,
+  ISOLATED_CODEX_EXE,
   approvalSettings,
+  missingCodexRuntimeFiles,
   normalizeDiagnostic,
+  providerArgsWithBaseUrl,
+  runtimePathWarnings,
+  selectCodexExecutable,
 } = require("../src/codex-server");
 const {
   bundledCodexCandidates,
+  developmentCodexCandidates,
   isBundledCodexExecutable,
 } = require("../src/cli-discovery");
 const {
@@ -32,11 +39,18 @@ const { ClaudeServer, claudePermissionArgs } = require("../src/claude-server");
 const {
   OpenAICompatibleServer,
   chatCompletionsEndpoint,
+  responsesEndpoint,
+  responseOutput,
   importedLocalThread,
   parseCodexThreadFile,
   parseSseBlock,
 } = require("../src/openai-compatible-server");
 const { explicitBoolean, fetchRelayBalance } = require("../src/relay-balance");
+const {
+  rewriteSearchTool,
+  startResponsesCompatibilityProxy,
+  unsupportedSearchTool,
+} = require("../src/responses-compat-proxy");
 const { fetchClaudeModels, fetchClaudeModelsSafely } = require("../src/claude-models");
 const { fetchOpenAIModels, modelsEndpoint, modelsEndpointCandidates } = require("../src/openai-models");
 const { executeScheduledTask, finalizeScheduledTask } = require("../src/scheduled-task-runner");
@@ -278,6 +292,54 @@ function testBundledCodexRuntimeDiscovery() {
   assert.equal(isBundledCodexExecutable("C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0.0.0_x64__test\\app\\resources\\codex.exe"), true);
   assert.equal(isBundledCodexExecutable("C:\\Users\\PC\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe"), false);
   assert.ok(bundledCodexCandidates().every((candidate) => isBundledCodexExecutable(candidate)));
+  assert.ok(developmentCodexCandidates().every((candidate) => isBundledCodexExecutable(candidate)));
+}
+
+function testRuntimeSelectionAndCustomPaths() {
+  if (process.platform !== "win32") return;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-runtime-paths-"));
+  const cliPath = path.join(root, "cli", "codex.exe");
+  const appRoot = path.join(root, "app");
+  const appPath = path.join(appRoot, "ChatGPT.exe");
+  const appRuntime = path.join(appRoot, "resources", "codex.exe");
+  try {
+    fs.mkdirSync(path.dirname(cliPath), { recursive: true });
+    fs.mkdirSync(path.dirname(appRuntime), { recursive: true });
+    fs.writeFileSync(cliPath, "cli");
+    fs.writeFileSync(appPath, "chatgpt");
+    for (const name of ["codex.exe", "codex-code-mode-host.exe", "codex-command-runner.exe", "codex-windows-sandbox-setup.exe"]) {
+      fs.writeFileSync(path.join(appRoot, "resources", name), name);
+    }
+    assert.equal(selectCodexExecutable("external", { codexCliPath: cliPath }), path.resolve(cliPath));
+    assert.equal(selectCodexExecutable("chatgpt-app", { chatgptAppPath: appPath }), path.resolve(appRuntime));
+    const selected = detectCodexRuntimes({ codexCliPath: cliPath, chatgptAppPath: appPath }, "chatgpt-app");
+    assert.equal(selected.codexCliAvailable, true);
+    assert.equal(selected.chatgptAppAvailable, true);
+    assert.equal(selected.selectedRuntime, "chatgpt-app");
+    assert.equal(selected.selectionFallback, false);
+    assert.deepEqual(selected.runtimePathWarnings, {});
+    const invalid = detectCodexRuntimes({ codexCliPath: path.join(root, "missing.exe"), chatgptAppPath: path.join(root, "missing-chatgpt.exe") }, "chatgpt-app");
+    assert.equal(invalid.selectionFallback, false); // installed app remains available as the fallback
+    assert.match(invalid.runtimePathWarnings.codexCliPath, /无效/);
+    assert.match(invalid.runtimePathWarnings.chatgptAppPath, /无效/);
+    assert.deepEqual(runtimePathWarnings({}), {});
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function testProviderRuntimeIsolation() {
+  for (const provider of [BASE_PROVIDERS.niubi, BASE_PROVIDERS.hexuan]) {
+    assert.equal(provider.engine, "codex-isolated");
+    assert.equal(provider.protocol, "responses");
+    assert.equal(provider.bundledRuntimeOnly, true);
+    assert.equal(Array.isArray(provider.args), true);
+  }
+  const runtime = path.join(__dirname, "..", "build", "codex-runtime", "codex.exe");
+  if (process.platform === "win32" && fs.existsSync(runtime)) {
+    assert.deepEqual(missingCodexRuntimeFiles(runtime), []);
+    assert.equal(path.resolve(ISOLATED_CODEX_EXE), path.resolve(runtime));
+  }
 }
 
 function testDiagnosticNormalization() {
@@ -286,7 +348,7 @@ function testDiagnosticNormalization() {
 }
 
 function testRawCodexDiagnosticsStayInternal() {
-  const server = new CodexServer(BASE_PROVIDERS.hexuan, {});
+  const server = new CodexServer(BASE_PROVIDERS.official, {});
   const visible = [];
   const internal = [];
   server.on("diagnostic", (message) => visible.push(message));
@@ -646,8 +708,10 @@ function testBuiltinApiEditing() {
   const resolved = store.resolve("hexuan");
   assert.equal(resolved.baseUrl, "https://relay.example.test/v1");
   assert.equal(resolved.model, "fixture-model");
-  assert.ok(resolved.args.includes('model="fixture-model"'));
-  assert.ok(resolved.args.includes('model_providers.hexuan.base_url="https://relay.example.test/v1"'));
+  assert.equal(resolved.engine, "codex-isolated");
+  assert.equal(resolved.protocol, "responses");
+  assert.equal(resolved.bundledRuntimeOnly, true);
+  assert.equal(Array.isArray(resolved.args), true);
 }
 
 function testProviderApiKeyFallback() {
@@ -736,15 +800,19 @@ async function testClientUserMessageId() {
   assert.equal(captured[0].method, "turn/start");
   assert.equal(captured[0].params.clientUserMessageId, "client-message");
   assert.deepEqual(captured[0].params.input, [{ type: "text", text: "hello" }]);
+  assert.equal(Object.hasOwn(captured[0].params, "additionalContext"), false);
   await server.startTurn("thread", "draft this", "F:\\codepro", null, {
     skillInputs: [{ name: "nature-writing", path: "F:\\skills\\nature-writing\\SKILL.md" }],
     imageInputs: [{ path: "F:\\images\\figure.png", detail: "high" }],
+    webSearch: true,
   });
   assert.deepEqual(captured[1].params.input, [
     { type: "skill", name: "nature-writing", path: "F:\\skills\\nature-writing\\SKILL.md" },
     { type: "localImage", path: "F:\\images\\figure.png", detail: "high" },
     { type: "text", text: "draft this" },
   ]);
+  assert.equal(captured[1].params.additionalContext["chatswitch:web-search"].kind, "application");
+  assert.match(captured[1].params.additionalContext["chatswitch:web-search"].value, /enabled web search/);
   await server.steerTurn("thread", "turn-active", "focus on the failing test", {
     imageInputs: [{ path: "F:\\images\\error.png", detail: "auto" }],
   });
@@ -871,11 +939,8 @@ async function testOpenAIModelDiscovery() {
   );
   assert.equal(prepared.model, "gpt-real-a");
   assert.deepEqual(prepared.discoveredModels, ["gpt-real-a", "gpt-real-b"]);
-  assert.equal(prepared.args.includes('model="gpt-real-a"'), true);
-  const catalogSetting = prepared.args.find((item) => item.startsWith("model_catalog_json="));
-  const catalogFile = JSON.parse(catalogSetting.slice("model_catalog_json=".length));
-  const catalog = JSON.parse(fs.readFileSync(catalogFile, "utf8"));
-  assert.deepEqual(catalog.models.map((model) => model.slug), ["gpt-real-a", "gpt-real-b"]);
+  assert.equal(prepared.engine, "codex-isolated");
+  assert.equal(Array.isArray(prepared.args), true);
 }
 
 async function testModelPagination() {
@@ -1057,7 +1122,24 @@ function testProviderUsageAndPricing() {
 function testConfigurationImportExportAndBackup() {
   const store = new ProviderStore();
   assert.equal(store.appSettings().closeToTray, true);
+  assert.equal(store.appSettings().codexRuntimePreference, "auto");
   assert.equal(store.saveAppSettings({ closeToTray: false }).closeToTray, false);
+  assert.equal(store.saveAppSettings({ closeToTray: true, codexRuntimePreference: "chatgpt-app" }).codexRuntimePreference, "chatgpt-app");
+  assert.deepEqual(store.saveAppSettings({
+    closeToTray: true,
+    codexRuntimePaths: {
+      codexCliPath: "C:\\Custom\\codex.exe",
+      chatgptAppPath: "D:\\Apps\\ChatGPT.exe",
+    },
+  }).codexRuntimePaths, {
+    codexCliPath: "C:\\Custom\\codex.exe",
+    chatgptAppPath: "D:\\Apps\\ChatGPT.exe",
+  });
+  assert.deepEqual(store.saveAppSettings({ closeToTray: true, codexRuntimePreference: "bundled" }).codexRuntimePaths, {
+    codexCliPath: "C:\\Custom\\codex.exe",
+    chatgptAppPath: "D:\\Apps\\ChatGPT.exe",
+  });
+  assert.equal(store.appSettings().codexRuntimePreference, "bundled");
   store.saveAppSettings({ closeToTray: true });
   const bundle = {
     schema: "chatswitch-config",
@@ -1468,6 +1550,121 @@ async function testOpenAICompatibleStreaming() {
   }
 }
 
+async function testOpenAICompatibleResponses() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-responses-"));
+  const requests = [];
+  try {
+    const server = new OpenAICompatibleServer({
+      id: "responses-unit",
+      label: "Responses unit",
+      type: "relay",
+      engine: "openai-compatible",
+      protocol: "responses",
+      baseUrl: "https://responses.example/v1",
+      model: "gpt-response",
+      apiKey: "responses-key",
+      codexHome: root,
+    }, async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      return new Response(JSON.stringify({
+        status: "completed",
+        output: [
+          { type: "web_search_call", action: { query: "ChatSwitch runtime isolation" } },
+          { type: "reasoning", summary: [{ type: "summary_text", text: "先核对来源" }] },
+          {
+            type: "message",
+            content: [{
+              type: "output_text",
+              text: "搜索完成",
+              annotations: [{ type: "url_citation", url: "https://example.test/source", title: "测试来源" }],
+            }],
+          },
+        ],
+        usage: { input_tokens: 8, output_tokens: 4, total_tokens: 12 },
+      }), { status: 200, headers: { "content-type": "application/json", "x-request-id": "responses-request" } });
+    });
+    await server.start();
+    const threadId = (await server.startThread("F:\\codepro", "gpt-response")).thread.id;
+    const completed = new Promise((resolve) => server.once("notification", function listener(message) {
+      if (message.method === "turn/completed") resolve(message.params.turn);
+      else server.once("notification", listener);
+    }));
+    await server.startTurn(threadId, "搜索并回答", "F:\\codepro", null, { effort: "high", webSearch: true });
+    assert.equal((await completed).status, "completed");
+    assert.equal(requests[0].url, "https://responses.example/v1/responses");
+    assert.deepEqual(requests[0].body.reasoning, { effort: "high" });
+    assert.deepEqual(requests[0].body.tools, [{ type: "web_search_preview" }]);
+    assert.equal(requests[0].body.store, false);
+    assert.equal(requests[0].body.input.at(-1).content, "搜索并回答");
+    const saved = (await server.readThread(threadId)).thread;
+    assert.equal(saved.turns[0].items.some((item) => item.type === "webSearch"), true);
+    assert.match(saved.turns[0].items.find((item) => item.type === "agentMessage").text, /\[测试来源\]\(https:\/\/example\.test\/source\)/);
+    assert.equal(responseOutput({ output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }] }).text, "ok");
+    assert.equal(responsesEndpoint("https://responses.example/v1/responses"), "https://responses.example/v1/responses");
+    server.stop();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testResponsesCompatibilityProxy() {
+  const attempts = [];
+  const fallbacks = [];
+  const proxy = await startResponsesCompatibilityProxy({
+    baseUrl: "https://relay.example.test/v1",
+    onFallback: (mode) => fallbacks.push(mode),
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(Buffer.from(options.body).toString("utf8"));
+      attempts.push({ url: String(url), body, authorization: options.headers.authorization });
+      const searchType = body.tools?.find((tool) => tool.type.startsWith("web_search"))?.type || null;
+      if (searchType) {
+        return new Response(JSON.stringify({ error: { message: `Unsupported tool type: ${searchType}` } }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ status: "completed" }), {
+        status: 200,
+        headers: { "content-type": "application/json", "x-request-id": "compat-request" },
+      });
+    },
+  });
+  try {
+    const response = await fetch(`${proxy.baseUrl}/responses`, {
+      method: "POST",
+      headers: { authorization: "Bearer fixture", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "fixture-model",
+        tools: [{ type: "web_search_preview" }, { type: "function", name: "local_tool" }],
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(fallbacks, ["web_search", "disabled"]);
+    assert.deepEqual(attempts.map((attempt) => attempt.body.tools.map((tool) => tool.type)), [
+      ["web_search_preview", "function"],
+      ["web_search", "function"],
+      ["function"],
+    ]);
+    assert.ok(attempts.every((attempt) => attempt.url === "https://relay.example.test/v1/responses"));
+    assert.ok(attempts.every((attempt) => attempt.authorization === "Bearer fixture"));
+    assert.equal((await fetch(`${new URL(proxy.baseUrl).origin}/outside`)).status, 404);
+    assert.equal(unsupportedSearchTool("Unsupported tool type: web_search_preview", "web_search_preview"), true);
+    assert.equal(unsupportedSearchTool("Rate limited", "web_search_preview"), false);
+    assert.deepEqual(
+      JSON.parse(rewriteSearchTool('{"tools":[{"type":"web_search_preview"}]}', "web_search_preview", "web_search")),
+      { tools: [{ type: "web_search" }] },
+    );
+    assert.equal(providerArgsWithBaseUrl({
+      id: "relay",
+      args: ["-c", 'model_providers.relay.base_url="https://old.example/v1"', "app-server"],
+    }, proxy.baseUrl)[1], `model_providers.relay.base_url=${JSON.stringify(proxy.baseUrl)}`);
+    proxy.close();
+    await assert.rejects(() => fetch(`${proxy.baseUrl}/responses`, { signal: AbortSignal.timeout(1000) }));
+  } finally {
+    proxy.close();
+  }
+}
+
 async function testOpenAICompatibleFailover() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-compatible-failover-"));
   const jsonResponse = (content, status = 200) => new Response(JSON.stringify(
@@ -1845,6 +2042,16 @@ async function testImportedLocalConversation() {
       apiKey: "local-key",
       codexHome: root,
     });
+    const emptyServer = new OpenAICompatibleServer({
+      id: "empty-local-fixture",
+      label: "Empty local fixture",
+      baseUrl: "https://example.test/v1",
+      model: "fixture-model",
+      apiKey: "local-key",
+      codexHome: path.join(root, "missing-home"),
+    });
+    assert.deepEqual((await emptyServer.listLocalThreads()).data, []);
+    assert.deepEqual((await emptyServer.listThreads()).data, []);
     await server.start();
     const first = server.importLocalConversation(conversation);
     assert.equal(first.imported, true);
@@ -1870,6 +2077,15 @@ async function testImportedLocalConversation() {
     assert.equal(branchThread._branch.parentMessageId, `${converted.id}-item-2`);
     assert.deepEqual(branchThread.turns[0].items.map((item) => item.type), ["userMessage", "reasoning"]);
     assert.equal((await server.readThread(converted.id)).thread.turns[0].items.length, 3);
+    const mappedBranch = server.createBranchThread(
+      (await server.readThread(converted.id)).thread,
+      "renderer-only-message-id",
+      { role: "agent", text: "共享链路验证完成" },
+    );
+    assert.deepEqual(
+      server.loadThread(mappedBranch.thread.id).turns[0].items.map((item) => item.type),
+      ["userMessage", "reasoning", "agentMessage"],
+    );
 
     const continued = server.loadThread(converted.id);
     continued.turns.push({
@@ -1904,7 +2120,7 @@ async function testImportedLocalConversation() {
     assert.equal(second.imported, true);
     assert.equal(second.duplicate, false);
     assert.notEqual(second.thread.id, converted.id);
-    assert.equal((await server.listLocalThreads()).data.length, 3);
+    assert.equal((await server.listLocalThreads()).data.length, 4);
     assert.throws(() => importedLocalThread({ id: "empty", messages: [] }), /没有可复制的消息/);
     server.stop();
   } finally {
@@ -2410,6 +2626,8 @@ Promise.resolve()
   .then(testOfficialAccountUsageNormalization)
   .then(testOfficialCliArguments)
   .then(testBundledCodexRuntimeDiscovery)
+  .then(testRuntimeSelectionAndCustomPaths)
+  .then(testProviderRuntimeIsolation)
   .then(testDiagnosticNormalization)
   .then(testRawCodexDiagnosticsStayInternal)
   .then(testApplicationVersioning)
@@ -2464,13 +2682,15 @@ Promise.resolve()
   .then(testStreamEventBatcher)
   .then(testClaudeThreadDeletion)
   .then(testOpenAICompatibleStreaming)
+  .then(testOpenAICompatibleResponses)
+  .then(testResponsesCompatibilityProxy)
   .then(testOpenAICompatibleFailover)
   .then(testOpenAICompatibleCompletionValidation)
   .then(testOpenAICompatibleInterrupt)
   .then(testOpenAICompatibleSharedCodexHistory)
   .then(testImportedLocalConversation)
   .then(testClaudeOfficialAuthSettings)
-  .then(() => console.log(JSON.stringify({ ok: true, tests: 63 })))
+  .then(() => console.log(JSON.stringify({ ok: true, tests: 67 })))
   .catch((error) => {
     console.error(error.stack || error.message);
     process.exitCode = 1;

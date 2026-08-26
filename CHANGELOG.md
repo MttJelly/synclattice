@@ -2,6 +2,26 @@
 
 本文件记录 ChatSwitch 每个版本的用户可见变化。版本号遵循语义化版本；每次向 GitHub 推送产品更新前，必须先更新版本号和本文件。
 
+## [0.1.21] - 2026-08-26
+
+### 新增
+
+- 应用设置增加 OpenAI / Codex 运行环境检测，可选择自动、本机 Codex、ChatGPT 应用或 ChatSwitch 内置运行时。
+- 支持手动选择安装在其他磁盘的 `codex.exe` 或 `ChatGPT.exe`，并显示实际运行时、回退状态和路径错误。
+- 中转 Responses 联网搜索增加兼容代理：不支持 `web_search_preview` 时自动尝试 `web_search`，仍不支持时关闭本次内置搜索并继续回答。
+
+### 优化
+
+- OpenAI 官方、中转服务和 ChatSwitch 内置运行时进一步隔离，应用在没有外部 Codex CLI 或 ChatGPT 应用时仍可独立启动和使用兼容 API 聊天。
+- README 重构首屏、产品截图、常用操作、运行环境说明和数据边界，并增加厂商与开源项目致谢。
+- 应用设置使用独立滚动区与固定操作栏，运行时路径错误支持就地提示和无障碍状态播报。
+
+### 修复
+
+- 修复保存其他应用设置时可能清空自定义运行时路径的问题。
+- 修复 QA 固定 profile 被异常中断进程占用后，重复测试出现目录或缓存错误的问题。
+- 修复界面审计未考虑滚动容器裁剪，导致不可见控件被误判为重叠的问题。
+
 ## [0.1.20] - 2026-08-26
 
 ### 新增
@@ -294,3 +314,4 @@
 [0.1.18]: https://github.com/MttJelly/chatswitch/compare/v0.1.17...v0.1.18
 [0.1.19]: https://github.com/MttJelly/chatswitch/compare/v0.1.18...v0.1.19
 [0.1.20]: https://github.com/MttJelly/chatswitch/compare/v0.1.19...v0.1.20
+[0.1.21]: https://github.com/MttJelly/chatswitch/compare/v0.1.20...v0.1.21

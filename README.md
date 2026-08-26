@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/MttJelly/chatswitch/releases/latest"><img src="https://img.shields.io/github/v/release/MttJelly/chatswitch?style=for-the-badge&label=Latest&labelColor=17211e&color=24a47b" alt="Latest release" /></a>
+  <a href="https://github.com/MttJelly/chatswitch/actions/workflows/quality.yml"><img src="https://img.shields.io/github/actions/workflow/status/MttJelly/chatswitch/quality.yml?style=for-the-badge&label=Quality&labelColor=17211e" alt="Quality workflow" /></a>
   <img src="https://img.shields.io/badge/Windows-x64-1676d2?style=for-the-badge&labelColor=17211e&logo=windows11&logoColor=white" alt="Windows x64" />
-  <img src="https://img.shields.io/badge/Vue-3-42b883?style=for-the-badge&labelColor=17211e&logo=vuedotjs&logoColor=white" alt="Vue 3" />
-  <img src="https://img.shields.io/badge/Electron-43-4f9aa8?style=for-the-badge&labelColor=17211e&logo=electron&logoColor=white" alt="Electron 43" />
+  <img src="https://img.shields.io/badge/Local--first-Privacy-59636b?style=for-the-badge&labelColor=17211e" alt="Local-first privacy" />
 </p>
 
 <p align="center">
@@ -23,6 +23,12 @@
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="docs/WORKSPACE_GUIDE.zh-CN.md"><strong>查看界面与按钮指南</strong></a>
 </p>
+
+<p align="center">
+  <img src="docs/assets/chatswitch-conversation.png" alt="ChatSwitch 主聊天工作区" width="100%" />
+</p>
+
+<p align="center"><sub>统一会话、模型切换、思考摘要、命令与文件修改都在一个工作区完成。截图来自隔离测试数据。</sub></p>
 
 ---
 
@@ -38,21 +44,22 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
                               └─→ Project、任务与扩展
 ```
 
+| 本地优先 | 上下文可续接 | 过程可检查 | 连接可替换 |
+| :---: | :---: | :---: | :---: |
+| 配置和会话默认保存在本机 | 导入旧会话后可换模型继续 | 查看命令、修改、搜索和思考摘要 | 官方账号、Claude Code 与兼容 API 共存 |
+
 ## 产品界面
 
 <table>
   <tr>
     <td width="50%" valign="top"><img src="docs/assets/chatswitch-connections.png" alt="ChatSwitch 连接中心" /><br /><sub>连接中心：官方账号、API、中转、模型发现、同步与用量入口</sub></td>
-    <td width="50%" valign="top"><img src="docs/assets/chatswitch-conversation.png" alt="ChatSwitch 聊天工作区" /><br /><sub>聊天工作区：思考摘要、命令、文件修改、联网搜索与推理强度</sub></td>
-  </tr>
-  <tr>
     <td width="50%" valign="top"><img src="docs/assets/chatswitch-local-history.png" alt="ChatSwitch 本地聊天记录" /><br /><sub>本地记录：只读扫描 Codex 与 Claude Code，并一键导入当前来源全部会话</sub></td>
-    <td width="50%" valign="top"><img src="docs/assets/chatswitch-file-preview.png" alt="ChatSwitch 文件预览" /><br /><sub>文件预览：在应用内查看支持的文档，同时保留系统程序打开入口</sub></td>
   </tr>
   <tr>
+    <td width="50%" valign="top"><img src="docs/assets/chatswitch-file-preview.png" alt="ChatSwitch 文件预览" /><br /><sub>文件预览：在应用内查看支持的文档，同时保留系统程序打开入口</sub></td>
     <td width="50%" valign="top"><img src="docs/assets/chatswitch-extensions.png" alt="ChatSwitch 扩展中心" /><br /><sub>扩展中心：集中管理 Skills、Prompt 模板与 MCP 服务</sub></td>
-    <td width="50%" valign="top"><img src="docs/assets/chatswitch-sync.png" alt="ChatSwitch 配置同步" /><br /><sub>配置同步：本地目录或 WebDAV、冲突状态与同步历史</sub></td>
   </tr>
+  <tr><td colspan="2" valign="top"><img src="docs/assets/chatswitch-sync.png" alt="ChatSwitch 配置同步" /><br /><sub>配置同步：本地目录或 WebDAV、冲突状态与同步历史</sub></td></tr>
 </table>
 
 <p align="center"><sub>所有截图均由隔离测试数据生成，不包含真实账号、API Key 或私人聊天。</sub></p>
@@ -73,6 +80,20 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
 | **连接管理** | 官方网页登录、API Key 安全存储、中转模型自动发现、连接检测、用量、价格和故障转移 |
 | **扩展与自动化** | Skills、Prompt、MCP，以及一次、每小时、每天、工作日、每周或每月执行的任务 |
 
+## 常用操作
+
+| 你想做什么 | 在哪里操作 | 结果 |
+| --- | --- | --- |
+| **切换模型** | 输入框下方的模型与推理强度选择器 | 当前逻辑会话保持不变，下一轮使用新连接继续 |
+| **分支到新聊天** | 将鼠标移到消息上，点击分支图标 | 复制该消息之前的上下文，原会话不受影响 |
+| **排队或立即引导** | 模型回答期间继续输入，使用发送按钮旁的模式 | 等当前回答完成后发送，或立即补充方向 |
+| **查看命令和修改** | 展开回答中的“执行命令”“修改文件” | 查看命令、输出、文件路径和差异内容 |
+| **导入全部记录** | 连接中心 → 自动扫描聊天记录 → 一键导入 | 生成去重的 ChatSwitch 私有副本，不修改源记录 |
+| **预览文件** | 点击消息中的 PDF、Office、文本或图片附件 | 在 ChatSwitch 内只读预览，也可选择系统程序打开 |
+| **管理扩展** | 连接中心 → Skills / Prompt / MCP | 安装、启用、测试或移除扩展 |
+
+完整的按钮、状态和键盘操作请查看[界面与按钮指南](docs/WORKSPACE_GUIDE.zh-CN.md)。
+
 ## 连接方式
 
 ### ChatGPT / Codex 官方
@@ -80,6 +101,8 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
 点击“登录 ChatGPT 官方（Codex）”后，ChatSwitch 会打开 OpenAI 官方网页完成验证。应用内不要求输入 ChatGPT 邮箱或密码；未完成登录时不会进入官方聊天工作区。官方返回可用信息时，账号面板会显示套餐、Codex 额度窗口、剩余额度、Credits 和重置时间。
 
 正式安装包包含 OpenAI 连接所需运行时，不要求用户另外安装 Codex CLI 或 ChatGPT 应用。没有官方登录时，ChatSwitch 仍可通过其他 API 和中转连接独立运行。
+
+在“应用设置 → OpenAI / Codex 运行环境”中，可以使用自动选择、优先本机 Codex、优先 ChatGPT 应用或仅使用 ChatSwitch 内置运行时。Codex CLI 和 ChatGPT 安装在其他磁盘时，也可以手动选择可执行文件；设置页会显示实际选择、可用状态和回退结果。
 
 ### Claude Code 官方
 
@@ -147,6 +170,21 @@ ChatSwitch 默认将私有配置和会话保存在：
 | [English User Guide](docs/USER_GUIDE.en.md) | Complete English setup and usage guide |
 | [更新日志](CHANGELOG.md) | 每个版本的新增、优化与修复 |
 | [发布维护流程](docs/RELEASE_PROCESS.md) | 版本、测试、构建与发布规范 |
+
+## 致谢
+
+ChatSwitch 能够连接不同模型、呈现丰富会话并保持桌面端体验，离不开以下厂商和开源社区。感谢他们公开的产品、协议、代码与工程实践：
+
+| AI 与开放协议 | 桌面与前端基础设施 |
+| --- | --- |
+| [OpenAI Codex](https://github.com/openai/codex) | [Electron](https://github.com/electron/electron) |
+| [Anthropic Claude Code](https://github.com/anthropics/claude-code) | [Vue](https://github.com/vuejs/core) |
+| [DeepSeek](https://github.com/deepseek-ai/DeepSeek-V3) | [Lucide](https://github.com/lucide-icons/lucide) |
+| [Qwen](https://github.com/QwenLM/Qwen3) | [Marked](https://github.com/markedjs/marked) |
+| [Model Context Protocol](https://github.com/modelcontextprotocol/servers) | [DOMPurify](https://github.com/cure53/DOMPurify) |
+|  | [Simple Icons](https://github.com/simple-icons/simple-icons) · [electron-builder](https://github.com/electron-userland/electron-builder) |
+
+ChatGPT、Codex、Claude、DeepSeek、Qwen 及其他产品名称和商标归各自权利人所有。ChatSwitch 是独立项目，与上述厂商不存在隶属或官方背书关系。
 
 ## 本地开发
 

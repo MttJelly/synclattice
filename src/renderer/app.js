@@ -8,6 +8,7 @@ const state = ChatSwitchVueRuntime.shallowReactive({
   providerEngine: null,
   runtimeKind: null,
   openaiRuntimeAvailable: true,
+  codexRuntimes: null,
   modelProvider: null,
   modelCatalog: [],
   skills: [],
@@ -147,6 +148,7 @@ let chatPinnedToBottom = true;
 let composerInputFrame = null;
 let lastComposerInputAt = Number.NEGATIVE_INFINITY;
 let streamInputDeferralStartedAt = null;
+let conversationIconFrame = null;
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -241,6 +243,14 @@ const renderMarkdown = (text) => {
   return rendered;
 };
 const refreshIcons = () => lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
+function scheduleConversationIcons(threadId) {
+  if (conversationIconFrame) cancelAnimationFrame(conversationIconFrame);
+  conversationIconFrame = requestAnimationFrame(() => {
+    conversationIconFrame = null;
+    if (state.renderedThreadId !== threadId) return;
+    refreshIcons();
+  });
+}
 const OPENABLE_DOCUMENT_PATTERN = /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|zip)$/i;
 
 function localDocumentPath(value) {
@@ -2501,7 +2511,7 @@ function renderConversation(thread) {
   state.renderedThreadRevision = revision;
   renderMessageQueuePanel(thread.id);
   syncThinkingIndicator();
-  refreshIcons();
+  scheduleConversationIcons(thread.id);
   scrollToBottom();
 }
 
@@ -2878,7 +2888,11 @@ function queuedMessageSteerKey(threadId, clientUserMessageId) {
 }
 
 function providerSupportsQueuedGuide() {
-  return ["codex", "openai-compatible", "claude"].includes(state.providerEngine);
+  return ["codex", "codex-isolated", "openai-compatible", "claude"].includes(state.providerEngine);
+}
+
+function providerUsesNativeCodex() {
+  return ["codex", "codex-isolated"].includes(state.providerEngine);
 }
 
 function queuedMessageCanSteer(threadId, message) {
@@ -3032,7 +3046,7 @@ function refreshQueuedSteerButtons(threadId = state.activeThread?.id) {
     button.disabled = !visible || !queuedMessageCanSteer(threadId, message);
     button.title = button.disabled
       ? "当前回复结束后将自动发送"
-      : state.providerEngine === "codex" ? "立即引导当前回复" : "停止当前回复并立即按这条消息继续";
+      : providerUsesNativeCodex() ? "立即引导当前回复" : "停止当前回复并立即按这条消息继续";
     button.setAttribute("aria-label", button.title);
   }
   const busy = queueThreadBusy(threadId);
@@ -3278,7 +3292,12 @@ async function branchFromMessage(node) {
     button.setAttribute("aria-label", button.title);
   }
   try {
-    const result = await api.branchThread({ threadId, messageId });
+    const result = await api.branchThread({
+      threadId,
+      messageId,
+      messageRole: node.dataset.messageRole || "",
+      messageText: node.dataset.rawText || "",
+    });
     await loadThreads();
     const branch = [...state.activeThreads, ...state.archivedThreads]
       .find((item) => item.id === result.thread?.id) || result.thread;
@@ -3679,7 +3698,7 @@ async function steerQueuedMessage(threadId, clientUserMessageId) {
   }
   const steerKey = queuedMessageSteerKey(threadId, clientUserMessageId);
   const expectedTurnId = run.turnId;
-  const useNativeSteer = state.providerEngine === "codex";
+  const useNativeSteer = providerUsesNativeCodex();
   const node = threadId === state.activeThread?.id
     ? appendPendingUserMessage(
       message.displayText || message.text || "",
@@ -4130,7 +4149,17 @@ function syncComposerState() {
   const controlsDisabled = disabled || state.modelCatalog.length === 0;
   elements.sessionModel.disabled = controlsDisabled;
   elements.sessionEffort.disabled = controlsDisabled;
-  elements.modeBadge.disabled = disabled || state.providerEngine === "openai-compatible";
+  elements.webSearchInput.title = !state.connected
+    ? "连接模型后可请求联网搜索"
+    : state.providerEngine === "openai-compatible" && currentProviderDefinition()?.protocol !== "responses"
+      ? "当前使用 Chat Completions；是否支持联网搜索由中转商和模型决定"
+      : "请求当前模型使用联网搜索（是否可用取决于供应商）";
+  const relayPermissionsUnavailable = state.providerEngine === "openai-compatible";
+  elements.modeBadge.disabled = disabled || relayPermissionsUnavailable;
+  elements.modeBadge.title = relayPermissionsUnavailable
+    ? "当前中转使用 Chat Completions，不提供本地命令、文件或 MCP 审批；切换到官方 Codex 或 Claude Code 后可调整"
+    : "调整本会话权限模式";
+  elements.modeBadge.setAttribute("aria-disabled", String(elements.modeBadge.disabled));
   elements.skillButton.disabled = disabled || state.skillsLoading || (state.skills.length + state.promptTemplates.length === 0);
   elements.attachButton.disabled = disabled || state.submitting;
   elements.input.placeholder = state.activeArchived
@@ -4384,7 +4413,7 @@ function renderNextApproval(threadId = state.activeThread?.id || null) {
   const params = request.params || {};
   const detail = params.command || params.reason || JSON.stringify(params.permissions || params, null, 2);
   elements.approval.classList.remove("hidden");
-  elements.approval.innerHTML = `<div class="approval-title">Codex 请求授权</div><div class="approval-detail">${escapeHtml(detail)}</div><div class="approval-actions"><button data-decision="decline">拒绝</button><button data-decision="acceptForSession">本会话允许</button><button class="approve" data-decision="accept">允许一次</button></div>`;
+  elements.approval.innerHTML = `<div class="approval-title">ChatSwitch 请求授权</div><div class="approval-detail">${escapeHtml(detail)}</div><div class="approval-actions"><button data-decision="decline">拒绝</button><button data-decision="acceptForSession">本会话允许</button><button class="approve" data-decision="accept">允许一次</button></div>`;
   elements.approval.querySelectorAll("button").forEach((button) => button.addEventListener("click", async () => {
     const decision = button.dataset.decision;
     for (const action of elements.approval.querySelectorAll("button")) action.disabled = true;
@@ -5632,6 +5661,10 @@ async function openAppSettingsDialog() {
     const settings = await api.appSettings();
     elements.appSettingsForm.elements.launchAtLogin.checked = Boolean(settings.launchAtLogin);
     elements.appSettingsForm.elements.closeToTray.checked = settings.closeToTray !== false;
+    elements.appSettingsForm.elements.codexRuntimePreference.value = settings.codexRuntimePreference || "auto";
+    elements.appSettingsForm.elements.codexCliPath.value = settings.codexRuntimePaths?.codexCliPath || "";
+    elements.appSettingsForm.elements.chatgptAppPath.value = settings.codexRuntimePaths?.chatgptAppPath || "";
+    renderCodexRuntimeStatus(settings.codexRuntimes || state.codexRuntimes, settings.codexRuntimePreference || "auto");
     $("#app-version").textContent = settings.version ? `v${settings.version}` : "v--";
     $("#update-status").textContent = "检查 GitHub Release，不会自动覆盖本地数据";
     $("#update-status").dataset.state = "idle";
@@ -5639,6 +5672,54 @@ async function openAppSettingsDialog() {
     $("#download-update-button").dataset.url = "";
   } catch (error) {
     $("#app-settings-status").textContent = error.message;
+  }
+}
+
+function renderCodexRuntimeStatus(info = state.codexRuntimes, preference = null) {
+  const runtime = info || {};
+  const selectedPreference = preference || elements.appSettingsForm?.elements.codexRuntimePreference?.value || "auto";
+  const availability = [
+    ["#runtime-bundled-status", Boolean(runtime.bundledAvailable)],
+    ["#runtime-cli-status", Boolean(runtime.codexCliAvailable)],
+    ["#runtime-app-status", Boolean(runtime.chatgptAppAvailable)],
+  ];
+  for (const [selector, available] of availability) {
+    const node = $(selector);
+    if (!node) continue;
+    node.textContent = available ? "可用" : "未检测到";
+    node.dataset.state = available ? "available" : "missing";
+  }
+  const runtimeLabel = (current) => current === "codex-cli" ? "Codex CLI"
+    : current === "chatgpt-app" ? "ChatGPT 应用运行时"
+      : current === "chatswitch-bundled" ? "ChatSwitch 内置运行时" : "无可用运行时";
+  const automaticLabel = runtimeLabel(runtime.automaticRuntime);
+  const selectedLabel = runtimeLabel(runtime.selectedRuntime || runtime.automaticRuntime);
+  const statusLabel = selectedPreference === "auto"
+    ? `自动选择：${automaticLabel}`
+    : runtime.selectionFallback
+      ? `当前选择不可用，已回退：${selectedLabel}`
+      : `当前选择：${selectedLabel}`;
+  $("#runtime-current-status")?.replaceChildren(document.createTextNode(statusLabel));
+  const warnings = runtime.runtimePathWarnings && typeof runtime.runtimePathWarnings === "object"
+    ? runtime.runtimePathWarnings
+    : {};
+  for (const [field, warning] of Object.entries(warnings)) {
+    const input = elements.appSettingsForm?.elements[field];
+    if (!input) continue;
+    input.setAttribute("aria-invalid", "true");
+    input.title = warning;
+  }
+  for (const field of ["codexCliPath", "chatgptAppPath"]) {
+    if (warnings[field]) continue;
+    const input = elements.appSettingsForm?.elements[field];
+    if (!input) continue;
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("title");
+  }
+  const pathStatus = $("#runtime-path-status");
+  if (pathStatus) {
+    pathStatus.textContent = Object.values(warnings).join(" ");
+    pathStatus.dataset.state = Object.keys(warnings).length ? "error" : "ok";
   }
 }
 
@@ -7009,6 +7090,16 @@ elements.syncOverlay.addEventListener("click", (event) => {
 });
 $("#app-settings-button").addEventListener("click", openAppSettingsDialog);
 $("#app-settings-close-button").addEventListener("click", closeAppSettingsDialog);
+async function chooseRuntimeExecutable(fieldName) {
+  try {
+    const selected = await api.chooseRuntimeExecutable();
+    if (selected) elements.appSettingsForm.elements[fieldName].value = selected;
+  } catch (error) {
+    $("#app-settings-status").textContent = error.message;
+  }
+}
+$("#choose-codex-cli-button").addEventListener("click", () => chooseRuntimeExecutable("codexCliPath"));
+$("#choose-chatgpt-app-button").addEventListener("click", () => chooseRuntimeExecutable("chatgptAppPath"));
 elements.appSettingsOverlay.addEventListener("click", (event) => {
   if (event.target === elements.appSettingsOverlay) closeAppSettingsDialog();
 });
@@ -7017,11 +7108,17 @@ elements.appSettingsForm.addEventListener("submit", async (event) => {
   const button = event.currentTarget.querySelector("button[type=submit]");
   button.disabled = true;
   try {
-    await api.saveAppSettings({
+    const saved = await api.saveAppSettings({
       launchAtLogin: event.currentTarget.elements.launchAtLogin.checked,
       closeToTray: event.currentTarget.elements.closeToTray.checked,
+      codexRuntimePreference: event.currentTarget.elements.codexRuntimePreference.value,
+      codexRuntimePaths: {
+        codexCliPath: event.currentTarget.elements.codexCliPath.value,
+        chatgptAppPath: event.currentTarget.elements.chatgptAppPath.value,
+      },
     });
-    $("#app-settings-status").textContent = "设置已保存。";
+    if (saved?.codexRuntimes) renderCodexRuntimeStatus(saved.codexRuntimes, saved.codexRuntimePreference || event.currentTarget.elements.codexRuntimePreference.value);
+    $("#app-settings-status").textContent = "设置已保存；重新连接官方账号后生效。";
   } catch (error) {
     $("#app-settings-status").textContent = error.message;
   } finally {
@@ -7405,6 +7502,7 @@ setInterval(() => {
     const bootstrap = await api.bootstrap();
     state.providers = bootstrap.providers;
     state.openaiRuntimeAvailable = bootstrap.openaiRuntimeAvailable !== false;
+    state.codexRuntimes = bootstrap.codexRuntimes || null;
     renderProviderPresetCatalog(bootstrap.providerPresets || []);
     state.savedProjects = bootstrap.projects || [];
     state.projectThreads = bootstrap.projectThreads || {};

@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("chatSwitch", {
   copyImage: (payload) => ipcRenderer.invoke("app:copy-image", payload),
   appSettings: () => ipcRenderer.invoke("app:settings"),
   saveAppSettings: (input) => ipcRenderer.invoke("app:save-settings", input),
+  chooseRuntimeExecutable: () => ipcRenderer.invoke("dialog:runtime-executable"),
   checkForUpdates: () => ipcRenderer.invoke("app:check-update"),
   localHistorySources: () => ipcRenderer.invoke("local-history:sources"),
   listLocalHistory: (input) => ipcRenderer.invoke("local-history:list", input),

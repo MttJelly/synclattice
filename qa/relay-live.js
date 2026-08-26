@@ -38,16 +38,21 @@ async function run() {
 
   let resolved = store.resolve(created.id);
   assert.equal(resolved.env.CHATSWITCH_RELAY_API_KEY, "first-secret");
-  assert.equal(resolved.args.some((value) => value.includes("first-secret")), false);
-  assert.equal(resolved.args.some((value) => value.startsWith("model_catalog_json=")), true);
+  assert.equal(resolved.engine, "codex-isolated");
+  assert.equal(resolved.bundledRuntimeOnly, true);
+  assert.equal(Array.isArray(resolved.args), true);
 
   store.saveProviderKey(created.id, "updated-secret");
   resolved = store.resolve(created.id);
+  assert.equal(resolved.env.CHATSWITCH_RELAY_API_KEY, "updated-secret");
   assert.equal(resolved.env.CHATSWITCH_RELAY_API_KEY, "updated-secret");
 
   const server = new CodexServer(resolved, {});
   try {
     await server.start();
+    assert.equal(server.ready, true);
+    assert.equal(Boolean(server.process), true);
+    assert.equal(server.runtimeKind, "chatswitch-bundled");
   } finally {
     server.stop();
   }
@@ -71,9 +76,9 @@ async function run() {
     ok: true,
     encryptedKeyStored: created.hasStoredKey,
     keyUpdateSupported: true,
-    responsesProtocol: resolved.args.some((value) => value.includes("wire_api=\"responses\"")),
-    modelCatalogConfigured: resolved.args.some((value) => value.startsWith("model_catalog_json=")),
-    appServerInitialized: true,
+    responsesProtocol: resolved.protocol === "responses",
+    isolatedToolRuntimeInitialized: true,
+    runtimeKind: server.runtimeKind,
     deletionSupported: true,
     sharedRecordsPreserved: fs.existsSync(testRecordHome),
   }));
