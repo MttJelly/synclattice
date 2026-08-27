@@ -65,6 +65,8 @@ const {
   requireAuthenticatedOfficialSnapshot,
 } = require("./openai-auth");
 const { normalizeRateLimits, normalizeAccountUsage } = require("./openai-account-usage");
+const { extractAttachmentText } = require("./attachment-text");
+const { threadExportContent, writeThreadExportFile } = require("./thread-export");
 
 // OpenAI-compatible relays do not always expose reasoning metadata. Keep a conservative
 // common set selectable and let the provider decide whether the request is honored.
@@ -1872,6 +1874,7 @@ async function startLogicalTurn(server, payload = {}) {
         skillInputs: Array.isArray(payload.skillInputs) ? payload.skillInputs : [],
         imageInputs: Array.isArray(payload.imageInputs) ? payload.imageInputs : [],
         fileInputs: Array.isArray(payload.fileInputs) ? payload.fileInputs : [],
+        fileHandling: payload.fileHandling === "openai" ? "openai" : "local",
         webSearch: Boolean(payload.webSearch),
       },
     );
@@ -2081,11 +2084,6 @@ const MAX_CLIPBOARD_IMAGE_BYTES = 25 * 1024 * 1024;
 const OPENABLE_DOCUMENT_PATTERN = /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md|csv|json|zip)$/i;
 const MAX_FILE_PREVIEW_BYTES = 50 * 1024 * 1024;
 const MAX_TEXT_PREVIEW_BYTES = 5 * 1024 * 1024;
-const OFFICE_PREVIEW_MEMBERS = {
-  ".docx": ["word/document.xml"],
-  ".pptx": ["ppt/slides/slide1.xml"],
-  ".xlsx": ["xl/sharedStrings.xml", "xl/worksheets/sheet1.xml"],
-};
 
 function resolveOpenableFile(target) {
   let value = String(target || "").trim();
@@ -2103,38 +2101,6 @@ function resolveOpenableFile(target) {
   return { filePath, stats };
 }
 
-function officeXmlText(value) {
-  return String(value || "")
-    .replace(/<w:tab\s*\/?>/gi, "\t")
-    .replace(/<w:(?:br|cr)\s*\/?>/gi, "\n")
-    .replace(/<\/w:p>/gi, "\n")
-    .replace(/<\/a:t>/gi, "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/\r\n?/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-async function officePreviewText(filePath, extension) {
-  const members = OFFICE_PREVIEW_MEMBERS[extension];
-  if (!members) return "";
-  for (const member of members) {
-    try {
-      const result = await execFilePromise("tar.exe", ["-xOf", filePath, member], { timeout: 12000, maxBuffer: MAX_TEXT_PREVIEW_BYTES });
-      const text = officeXmlText(result.stdout);
-      if (text) return text.slice(0, MAX_TEXT_PREVIEW_BYTES);
-    } catch {
-      // A legacy or malformed Office archive falls back to the system opener.
-    }
-  }
-  return "";
-}
-
 async function previewFile(target) {
   const { filePath, stats } = resolveOpenableFile(target);
   const extension = path.extname(filePath).toLowerCase();
@@ -2150,8 +2116,18 @@ async function previewFile(target) {
     return { ...base, kind: extension === ".md" ? "markdown" : "text", content };
   }
   if ([".docx", ".xlsx", ".pptx"].includes(extension)) {
-    const content = await officePreviewText(filePath, extension);
-    return { ...base, kind: content ? "office-text" : "office", content };
+    try {
+      const extracted = extractOfficeText(filePath, { extension, maxCharacters: MAX_TEXT_PREVIEW_BYTES });
+      return {
+        ...base,
+        kind: extracted.text ? "office-text" : "office",
+        content: extracted.text,
+        sections: extracted.sections,
+        truncated: extracted.truncated,
+      };
+    } catch {
+      return { ...base, kind: "office", content: "" };
+    }
   }
   if (extension === ".zip") {
     try {
@@ -3064,31 +3040,17 @@ app.whenReady().then(async () => {
       try { response = await sharedReadThread(server, threadId); } catch { response = await sharedHistoryReaders().compatible.readThread(threadId); }
     } else response = await sharedHistoryReaders().compatible.readThread(threadId);
     const thread = response.thread || response;
-    const title = String(thread.name || thread.preview || "ChatSwitch 会话").trim().slice(0, 80) || "ChatSwitch 会话";
-    const safeTitle = title.replace(/[<>:"/\\\\|?*]+/g, "_");
-    const rows = (thread.turns || []).flatMap((turn) => (turn.items || []).map((item) => {
-      const role = item.type === "userMessage" ? "用户" : item.type === "reasoning" ? "推理摘要" : "助手";
-      const text = item.type === "userMessage"
-        ? (item.content || []).map((part) => part.text || "").join("\\n")
-        : item.text || (item.summary || []).map((part) => part.text || "").join("\\n");
-      return { role, text: String(text || "").trim() };
-    }).filter((item) => item.text));
-    const markdown = "# " + title + "\\n\\n" + rows.map((row) => "## " + row.role + "\\n\\n" + row.text).join("\\n\\n---\\n\\n") + "\\n";
-    const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
-    const html = "<!doctype html><meta charset=\"utf-8\"><title>" + escape(title) + "</title><style>body{font:16px system-ui;max-width:860px;margin:40px auto;line-height:1.65;color:#1b2529}h1{border-bottom:1px solid #d6dfe0;padding-bottom:12px}h2{margin-top:28px;color:#087f68;white-space:pre-wrap}p{white-space:pre-wrap}</style><h1>" + escape(title) + "</h1>" + rows.map((row) => "<h2>" + escape(row.role) + "</h2><p>" + escape(row.text) + "</p>").join("");
+    const exported = threadExportContent(thread);
     const owner = BrowserWindow.fromWebContents(event.sender);
-    const result = await dialog.showSaveDialog(owner, { title: "导出会话", defaultPath: safeTitle + "." + format, filters: [{ name: format.toUpperCase(), extensions: [format] }] });
+    const result = await dialog.showSaveDialog(owner, { title: "导出会话", defaultPath: exported.safeTitle + "." + format, filters: [{ name: format.toUpperCase(), extensions: [format] }] });
     if (result.canceled || !result.filePath) return { canceled: true };
-    if (format === "json") fs.writeFileSync(result.filePath, JSON.stringify(thread, null, 2) + "\\n", "utf8");
-    else if (format === "html") fs.writeFileSync(result.filePath, html, "utf8");
-    else if (format === "md") fs.writeFileSync(result.filePath, markdown, "utf8");
-    else {
+    if (format === "pdf") {
       const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       try {
-        await printWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
-        fs.writeFileSync(result.filePath, await printWindow.webContents.printToPDF({ printBackground: true, pageSize: "A4" }));
+        await printWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(exported.html));
+        await writeThreadExportFile(result.filePath, format, thread, () => printWindow.webContents.printToPDF({ printBackground: true, pageSize: "A4" }));
       } finally { if (!printWindow.isDestroyed()) printWindow.destroy(); }
-    }
+    } else await writeThreadExportFile(result.filePath, format, thread);
     return { canceled: false, filePath: result.filePath, format };
   });
   ipcMain.handle("config:import", async (event) => {
@@ -3308,18 +3270,28 @@ app.whenReady().then(async () => {
       const resolved = resolveOpenableFile(target);
       const extension = path.extname(resolved.filePath).toLowerCase();
       if ([".txt", ".md", ".csv", ".json", ".docx", ".xlsx", ".pptx"].includes(extension)) {
-        const preview = await previewFile(resolved.filePath);
-        if (!preview.content) throw new Error(`${path.basename(resolved.filePath)} 没有可提取的文本。`);
-        results.push({ fileName: path.basename(resolved.filePath), content: preview.content.slice(0, 120000) });
+        const extracted = await extractAttachmentText(resolved.filePath, { extension, maxBytes: MAX_TEXT_PREVIEW_BYTES, maxCharacters: 120000 });
+        if (!extracted.text) throw new Error(`${path.basename(resolved.filePath)} 没有可提取的文本。`);
+        results.push({
+          fileName: path.basename(resolved.filePath),
+          content: extracted.text,
+          sections: extracted.sections,
+          pages: extracted.pages,
+          truncated: extracted.truncated,
+        });
         continue;
       }
       if (extension === ".pdf") {
         try {
-          const extracted = await execFilePromise("pdftotext.exe", ["-layout", resolved.filePath, "-"], { timeout: 20000, maxBuffer: 8 * 1024 * 1024 });
-          if (!extracted.stdout.trim()) throw new Error("PDF 没有可提取文本");
-          results.push({ fileName: path.basename(resolved.filePath), content: extracted.stdout.slice(0, 120000) });
+          const extracted = await extractAttachmentText(resolved.filePath, { extension, maxCharacters: 120000 });
+          results.push({
+            fileName: path.basename(resolved.filePath),
+            content: extracted.text,
+            pages: extracted.pages,
+            truncated: extracted.truncated,
+          });
         } catch (error) {
-          throw new Error(`${path.basename(resolved.filePath)} 暂时无法提取文本：请确认 PDF 包含文字层。`);
+          throw new Error(`${path.basename(resolved.filePath)} 无法提取文本：${error.message}`);
         }
         continue;
       }

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { isNativeOpenAIFileProvider } = require("./openai-file-inputs");
 const crypto = require("node:crypto");
 const { safeStorage } = require("electron");
 const { CODEX_HOME, BASE_PROVIDERS } = require("./codex-server");
@@ -78,11 +79,19 @@ function cleanQueuedMessage(input) {
     .slice(0, 20)
     .map((image) => ({ path: String(image?.path || "").slice(0, 2000), detail: "auto" }))
     .filter((image) => image.path);
-  if (!text.trim() && !imageInputs.length) return null;
+  const fileInputs = (Array.isArray(input.fileInputs) ? input.fileInputs : [])
+    .slice(0, 8)
+    .map((file) => ({
+      path: String(file?.path || "").slice(0, 2000),
+      fileName: String(file?.fileName || "").slice(0, 260),
+    }))
+    .filter((file) => file.path);
+  if (!text.trim() && !imageInputs.length && !fileInputs.length) return null;
   return {
     text,
     displayText,
     imageInputs,
+    fileInputs,
     skillInputs: (Array.isArray(input.skillInputs) ? input.skillInputs : [])
       .slice(0, 20)
       .map((skill) => ({
@@ -93,6 +102,7 @@ function cleanQueuedMessage(input) {
     cwd: String(input.cwd || "").slice(0, 2000),
     clientUserMessageId: String(input.clientUserMessageId || "").slice(0, 100),
     providerId: String(input.providerId || "").slice(0, 160) || null,
+    fileHandling: input.fileHandling === "openai" ? "openai" : "local",
     model: String(input.model || "").slice(0, 160) || null,
     effort: String(input.effort || "").slice(0, 32) || null,
     approvalMode: ["ask", "auto", "full"].includes(input.approvalMode) ? input.approvalMode : "ask",
@@ -137,8 +147,8 @@ const PROVIDER_PRESETS = {
     group: "官方模型",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-5.4",
-    protocol: "chat_completions",
-    note: "OpenAI 官方 Chat Completions 接口。",
+    protocol: "responses",
+    note: "直连 OpenAI 官方 Responses API；支持图片与 PDF、Word、Excel、PPT 等原生文件输入。",
   },
   deepseek: {
     label: "DeepSeek",
@@ -811,6 +821,7 @@ class ProviderStore {
       hasStoredKey: provider.type === "relay"
         ? Boolean(this.decryptRelayKey(provider.id))
         : Boolean(this.decryptStoredProviderKey(provider.id)),
+      nativeFileInputs: isNativeOpenAIFileProvider(provider),
     }));
   }
 
@@ -2738,7 +2749,7 @@ class ProviderStore {
     const relay = metadata.relays.find((item) => item.id === id);
     if (relay) {
       const apiKey = this.decryptRelayKey(relay.id);
-      if ((relay.protocol || "responses") === "chat_completions") {
+      if ((relay.protocol || "responses") === "chat_completions" || isNativeOpenAIFileProvider(relay)) {
         return {
           ...relay,
           type: "relay",

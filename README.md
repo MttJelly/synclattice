@@ -1,4 +1,4 @@
-<h1 align="center">ChatSwitch</h1>
+<h1 align="center">💬 ChatSwitch</h1>
 
 <p align="center">
   <strong>一段对话，随时切换模型，继续完成工作</strong>
@@ -17,11 +17,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MttJelly/chatswitch/releases/latest/download/ChatSwitch-portable-win-x64.zip"><strong>下载 ZIP 便携版</strong></a>
+  <a href="https://github.com/MttJelly/chatswitch/releases/latest/download/ChatSwitch-portable-win-x64.zip"><strong>📦 下载 ZIP 便携版</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://github.com/MttJelly/chatswitch/releases/latest/download/ChatSwitch-setup-win-x64.msi"><strong>下载 MSI 安装版</strong></a>
+  <a href="https://github.com/MttJelly/chatswitch/releases/latest/download/ChatSwitch-setup-win-x64.msi"><strong>🪟 下载 MSI 安装版</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="docs/WORKSPACE_GUIDE.zh-CN.md"><strong>查看界面与按钮指南</strong></a>
+  <a href="docs/WORKSPACE_GUIDE.zh-CN.md"><strong>📖 查看界面与按钮指南</strong></a>
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@
 
 ---
 
-## ChatSwitch 是什么
+## ✨ ChatSwitch 是什么
 
 不同 AI 客户端各自保存聊天记录，换模型时往往需要重新复制背景、附件和任务目标。ChatSwitch 将这些来源组织成一个本地工作区：你可以只读扫描原始历史，将需要的会话复制到 ChatSwitch，再选择另一种模型继续对话。原始客户端记录不会被覆盖。
 
@@ -44,11 +44,11 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
                               └─→ Project、任务与扩展
 ```
 
-| 本地优先 | 上下文可续接 | 过程可检查 | 连接可替换 |
+| 🔒 本地优先 | 🔁 上下文可续接 | 🔍 过程可检查 | 🔌 连接可替换 |
 | :---: | :---: | :---: | :---: |
 | 配置和会话默认保存在本机 | 导入旧会话后可换模型继续 | 查看命令、修改、搜索和思考摘要 | 官方账号、Claude Code 与兼容 API 共存 |
 
-## 产品界面
+## 🖥️ 产品界面
 
 <table>
   <tr>
@@ -64,7 +64,7 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
 
 <p align="center"><sub>所有截图均由隔离测试数据生成，不包含真实账号、API Key 或私人聊天。</sub></p>
 
-## 核心能力
+## 🚀 核心能力
 
 | 能力 | 当前可以完成的工作 |
 | --- | --- |
@@ -80,7 +80,25 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
 | **连接管理** | 官方网页登录、API Key 安全存储、中转模型自动发现、连接检测、用量、价格和故障转移 |
 | **扩展与自动化** | Skills、Prompt、MCP，以及一次、每小时、每天、工作日、每周或每月执行的任务 |
 
-## 常用操作
+## 📎 文件读取与生成
+
+ChatSwitch 会根据连接类型选择文件处理方式：OpenAI 官方 Responses API 可在确认后临时上传文件；其他兼容 API 和中转连接会先在本机提取文字，再把可见文本加入本次消息。临时上传到 OpenAI 的文件会在请求结束后发起删除。
+
+| 格式 | 读取能力 | 说明 |
+| --- | --- | --- |
+| **PDF** | ✅ 支持 | 按页提取文字层；扫描版 PDF 仍需要 OCR |
+| **DOCX** | ✅ 支持 | 提取全部正文段落 |
+| **XLSX** | ✅ 支持 | 按工作簿顺序读取全部工作表，并标注工作表和单元格 |
+| **PPTX** | ✅ 支持 | 按演示文稿顺序读取全部幻灯片，并标注页码 |
+| **TXT / Markdown / CSV / JSON** | ✅ 支持 | 直接读取本地文本内容 |
+| **DOC / XLS / PPT** | ⚠️ 有条件支持 | OpenAI 官方文件输入可上传；本地中转暂不提取旧版二进制 Office 文本 |
+| **图片** | ✅ 支持 | 通过图片附件通道发送，能力取决于模型是否支持视觉输入 |
+
+目前可以将单个会话生成并导出为 **Markdown、HTML、PDF 或 JSON**。ChatSwitch 暂不直接生成 DOCX、XLSX 或 PPTX 文件；模型可以生成内容与结构，但应用还没有对应的原生 Office 写入器。
+
+> 🔐 文件默认留在本机。只有你在 OpenAI 官方连接中确认“上传并发送”后，文件才会离开设备；普通中转不会收到原始文件，只会收到本地提取后的文本。
+
+## 🧭 常用操作
 
 | 你想做什么 | 在哪里操作 | 结果 |
 | --- | --- | --- |
@@ -94,9 +112,9 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
 
 完整的按钮、状态和键盘操作请查看[界面与按钮指南](docs/WORKSPACE_GUIDE.zh-CN.md)。
 
-## 连接方式
+## 🔌 连接方式
 
-### ChatGPT / Codex 官方
+### 🟢 ChatGPT / Codex 官方
 
 点击“登录 ChatGPT 官方（Codex）”后，ChatSwitch 会打开 OpenAI 官方网页完成验证。应用内不要求输入 ChatGPT 邮箱或密码；未完成登录时不会进入官方聊天工作区。官方返回可用信息时，账号面板会显示套餐、Codex 额度窗口、剩余额度、Credits 和重置时间。
 
@@ -104,23 +122,23 @@ API 与中转服务 ─┘             ├─→ 文件与联网搜索
 
 在“应用设置 → OpenAI / Codex 运行环境”中，可以使用自动选择、优先本机 Codex、优先 ChatGPT 应用或仅使用 ChatSwitch 内置运行时。Codex CLI 和 ChatGPT 安装在其他磁盘时，也可以手动选择可执行文件；设置页会显示实际选择、可用状态和回退结果。
 
-### Claude Code 官方
+### 🟠 Claude Code 官方
 
 Claude Code 使用独立的 Anthropic 官方登录入口，不与 ChatGPT 登录共用认证。若本机没有 Claude Code CLI，也可以配置 Anthropic API Token 或兼容中转服务。
 
-### API 与中转服务
+### 🔵 API 与中转服务
 
 填写 Base URL 和 API Key 后，点击“测试连接并读取模型”。ChatSwitch 只允许从供应商 `/models` 或 `/v1/models` 实际返回的列表选择模型，不要求手写未知模型 ID。已保存的 Key 显示为 `********`，测试时从 Windows 安全存储读取原值；输入新 Key 可直接替换。
 
-## 聊天记录共享
+## 🔁 聊天记录共享
 
 “自动扫描聊天记录”只读查找本机 Codex、Codex App 和 Claude Code 会话。预览不会改变源文件；复制后会生成 ChatSwitch 私有会话，之后可选择任意可用连接继续聊天。同一来源重复导入会复用已有副本，不覆盖你后来在 ChatSwitch 中产生的新消息。
 
 “记录位置”中的 Codex 历史副本支持按 15 秒、30 秒、1 分钟或 5 分钟间隔进行单向复制。它不会把 ChatSwitch 的新消息写回原始 JSONL，因此不制造两个客户端同时写入同一会话的风险。
 
-> WebDAV 当前同步的是配置结构，不包含聊天正文、附件、API Key 或 MCP 密钥。端到端加密的聊天增量同步仍属于后续规划。
+> ☁️ WebDAV 当前同步的是配置结构，不包含聊天正文、附件、API Key 或 MCP 密钥。端到端加密的聊天增量同步仍属于后续规划。
 
-## 快速开始
+## ⚡ 快速开始
 
 1. 下载 MSI 安装版，或解压 ZIP 便携版。
 2. 打开 ChatSwitch，选择官方登录或添加 API / 中转连接。
@@ -128,7 +146,7 @@ Claude Code 使用独立的 Anthropic 官方登录入口，不与 ChatGPT 登录
 4. 选择模型与推理强度，添加需要的文件，然后开始聊天。
 5. 在回答期间继续输入，按任务需要选择排队、引导、停止或切换会话。
 
-## 下载与安装
+## 📥 下载与安装
 
 | 发行包 | 适用场景 | 下载 |
 | --- | --- | --- |
@@ -137,7 +155,7 @@ Claude Code 使用独立的 Anthropic 官方登录入口，不与 ChatGPT 登录
 
 Release 同时提供带版本号的安装包、稳定下载别名和 `release-manifest.json` SHA-256 清单。
 
-## 数据与隐私
+## 🔐 数据与隐私
 
 ChatSwitch 默认将私有配置和会话保存在：
 
@@ -151,7 +169,7 @@ ChatSwitch 默认将私有配置和会话保存在：
 - 新安装默认是空白状态，不会自动导入外部账号、聊天记录或 API Key。
 - 卸载应用不会自动删除数据目录，手动清理前请先备份需要保留的会话。
 
-## 平台规划
+## 🗺️ 平台规划
 
 | 平台与能力 | 当前状态 | 目标 |
 | --- | --- | --- |
@@ -161,7 +179,7 @@ ChatSwitch 默认将私有配置和会话保存在：
 | **手机端** | 规划中 | 优先支持会话查看、继续发送、附件与任务通知 |
 | **聊天同步** | 设计中 | 端到端加密增量事件、附件去重和多端冲突处理 |
 
-## 文档
+## 📚 文档
 
 | 文档 | 内容 |
 | --- | --- |
@@ -171,7 +189,7 @@ ChatSwitch 默认将私有配置和会话保存在：
 | [更新日志](CHANGELOG.md) | 每个版本的新增、优化与修复 |
 | [发布维护流程](docs/RELEASE_PROCESS.md) | 版本、测试、构建与发布规范 |
 
-## 致谢
+## 🤝 致谢
 
 ChatSwitch 能够连接不同模型、呈现丰富会话并保持桌面端体验，离不开以下厂商和开源社区。感谢他们公开的产品、协议、代码与工程实践：
 
@@ -186,7 +204,7 @@ ChatSwitch 能够连接不同模型、呈现丰富会话并保持桌面端体验
 
 ChatGPT、Codex、Claude、DeepSeek、Qwen 及其他产品名称和商标归各自权利人所有。ChatSwitch 是独立项目，与上述厂商不存在隶属或官方背书关系。
 
-## 本地开发
+## 🛠️ 本地开发
 
 需要 Node.js 20 或更高版本。
 

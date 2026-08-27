@@ -1,7 +1,7 @@
 {
   "name": "chatswitch",
   "productName": "ChatSwitch",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "author": "ChatSwitch",
   "private": true,
   "description": "ChatSwitch: a multi-account, multi-provider desktop client for shared conversation context.",
@@ -17,7 +17,7 @@
     "dist:msi": "npm run prepack:win && electron-builder --win msi --x64 && node scripts/finalize-release.js",
     "prestart": "npm run build:icon && npm run build:renderer",
     "start": "electron .",
-    "check": "node scripts/build-vue-render.js --check && node --check src/main.js && node --check src/deep-link.js && node --check src/codex-server.js && node --check src/responses-compat-proxy.js && node --check src/openai-auth.js && node --check src/openai-account-usage.js && node --check src/conversation-integrity.js && node --check src/approval-request.js && node --check src/windows-notification-identity.js && node --check src/claude-server.js && node --check src/openai-compatible-server.js && node --check src/conversation-branches.js && node --check src/stream-event-batcher.js && node --check src/local-conversation-history.js && node --check src/local-provider-discovery.js && node --check src/claude-models.js && node --check src/openai-models.js && node --check src/provider-store.js && node --check src/relay-balance.js && node --check src/scheduled-task-runner.js && node --check src/conversation-mirror.js && node --check src/skill-mirror.js && node --check src/preload.js && node --check src/renderer/vue-bootstrap.js && node --check src/renderer/app.js && node --check qa/unit.js && node --check qa/vue-renderer.js && node --check qa/local-provider-discovery.js && node --check qa/hour-stability.js && node --check qa/logical-branches.js && node --check qa/deep-link-import.js && node --check qa/niubi-live.js && node --check qa/claude-live.js && node --check qa/claude-model-fallback.js && node --check qa/relay-live.js && node --check qa/official-connect-smoke.js && node --check qa/multi-window.js && node --check qa/model-settings.js && node --check qa/thread-actions.js && node --check qa/project-actions.js && node --check qa/thread-switch-performance.js && node --check qa/app-server-smoke.js",
+    "check": "node scripts/build-vue-render.js --check && node --check src/main.js && node --check src/deep-link.js && node --check src/codex-server.js && node --check src/responses-compat-proxy.js && node --check src/openai-auth.js && node --check src/openai-account-usage.js && node --check src/openai-file-inputs.js && node --check src/office-text.js && node --check src/attachment-text.js && node --check src/pdf-text.js && node --check src/thread-export.js && node --check src/conversation-integrity.js && node --check src/approval-request.js && node --check src/windows-notification-identity.js && node --check src/claude-server.js && node --check src/openai-compatible-server.js && node --check src/conversation-branches.js && node --check src/stream-event-batcher.js && node --check src/local-conversation-history.js && node --check src/local-provider-discovery.js && node --check src/claude-models.js && node --check src/openai-models.js && node --check src/provider-store.js && node --check src/relay-balance.js && node --check src/scheduled-task-runner.js && node --check src/conversation-mirror.js && node --check src/skill-mirror.js && node --check src/preload.js && node --check src/renderer/vue-bootstrap.js && node --check src/renderer/app.js && node --check qa/unit.js && node --check qa/vue-renderer.js && node --check qa/local-provider-discovery.js && node --check qa/hour-stability.js && node --check qa/logical-branches.js && node --check qa/deep-link-import.js && node --check qa/niubi-live.js && node --check qa/claude-live.js && node --check qa/claude-model-fallback.js && node --check qa/relay-live.js && node --check qa/official-connect-smoke.js && node --check qa/multi-window.js && node --check qa/model-settings.js && node --check qa/thread-actions.js && node --check qa/project-actions.js && node --check qa/thread-switch-performance.js && node --check qa/app-server-smoke.js",
     "test:unit": "node qa/unit.js",
     "test:vue-ui": "electron qa/vue-renderer.js",
     "test:stability-hour": "electron qa/hour-stability.js",
@@ -38,9 +38,12 @@
     "test:smoke": "node qa/app-server-smoke.js"
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.9.12",
     "dompurify": "^3.2.6",
+    "fflate": "^0.8.2",
     "lucide": "^0.468.0",
     "marked": "^15.0.12",
+    "pdfjs-dist": "5.4.296",
     "simple-icons": "^14.15.0",
     "vue": "^3.5.40"
   },

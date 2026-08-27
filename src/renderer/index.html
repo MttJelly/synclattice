@@ -218,7 +218,7 @@
           <label><span>Base URL</span><input name="baseUrl" type="url" required placeholder="https://example.com/v1" /></label>
           <label><span>可用模型（来自中转商）</span><select id="provider-model-select" name="model" required disabled aria-describedby="provider-model-help connection-error"><option value="">请先测试连接并读取模型</option></select></label>
           <p id="provider-model-help" class="form-note">ChatSwitch 会从中转商的 <code>/models</code> 或 <code>/v1/models</code> 接口读取可用模型。只有读取成功后，才能选择模型并保存连接。</p>
-          <label><span>API 协议</span><select name="protocol"><option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses（Codex 代理）</option></select></label>
+          <label><span>API 协议</span><select name="protocol"><option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses</option></select></label>
           <label><span>API Key</span><input name="apiKey" type="password" required autocomplete="new-password" placeholder="请输入 API Key" aria-describedby="provider-api-key-help connection-error" /></label>
           <p id="provider-api-key-help" class="form-note">API Key 仅加密保存在本机。已配置时显示为 <code>********</code>，不会返回或暴露原文。</p>
           <div class="model-load-row provider-model-load-row">

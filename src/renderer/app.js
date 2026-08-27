@@ -462,6 +462,7 @@ const approvalModeLabels = {
   full: "完全访问",
 };
 const currentProviderDefinition = () => state.providers.find((item) => item.id === state.provider) || null;
+const usesNativeOpenAIFileInputs = () => Boolean(currentProviderDefinition()?.nativeFileInputs);
 const threadSettingsKey = (threadId) => `${state.provider}:${threadId}`;
 const pendingDeletion = (threadId) => state.pendingDeletions.find((item) => item.threadId === threadId) || null;
 const taskBelongsToProject = (task, project) => {
@@ -947,6 +948,7 @@ function connect(provider, closeOverlay = true, reconnecting = false) {
       state.relayBalance = null;
       applyAccountSnapshot(result);
       setConnected(true, result.label);
+      renderAttachments();
       renderProviderOptions();
       renderAccountPanel();
       clearReconnectTimer(true);
@@ -2732,12 +2734,15 @@ function safeImageSource(value, isLocal = false) {
 }
 
 function renderAttachments() {
+  const nativeOpenAIFiles = usesNativeOpenAIFileInputs();
   ChatSwitchVueRuntime.attachmentUi.items = state.pendingAttachments.map((filePath) => ({
     path: filePath,
     name: String(filePath).split(/[\\/]/).filter(Boolean).at(-1) || "图片附件",
     isImage: IMAGE_ATTACHMENT_PATTERN.test(filePath),
     extension: (String(filePath).match(/\.([^.\\/]+)$/)?.[1] || "file").toUpperCase().slice(0, 5),
-    typeLabel: IMAGE_ATTACHMENT_PATTERN.test(filePath) ? "图片附件" : "文档附件",
+    typeLabel: IMAGE_ATTACHMENT_PATTERN.test(filePath)
+      ? "图片附件"
+      : nativeOpenAIFiles ? "将上传至 OpenAI" : "本地提取文本",
     url: IMAGE_ATTACHMENT_PATTERN.test(filePath) ? localImageUrl(filePath) : null,
   }));
 }
@@ -2910,7 +2915,10 @@ function queuedMessageCanSteer(threadId, message) {
 }
 
 function queuedMessageAttachmentPaths(message) {
-  return (message?.imageInputs || []).map((image) => image?.path).filter(Boolean);
+  return [
+    ...(message?.imageInputs || []).map((image) => image?.path),
+    ...(message?.fileInputs || []).map((file) => file?.path),
+  ].filter(Boolean);
 }
 
 function queueThreadBusy(threadId) {
@@ -3780,9 +3788,27 @@ async function sendMessage(_deliveryMode = "auto") {
   if ((!text && !attachments.length) || !state.connected || state.submitting) return;
   const { prompt: parsedPrompt, skillInputs } = parseSkillInvocations(text);
   let prompt = parsedPrompt;
-  if (attachments.some((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath))) {
+  const documentAttachments = attachments.filter((filePath) => !IMAGE_ATTACHMENT_PATTERN.test(filePath));
+  const nativeOpenAIFiles = documentAttachments.length > 0 && usesNativeOpenAIFileInputs();
+  const confirmedProviderId = state.provider;
+  if (nativeOpenAIFiles) {
+    const confirmed = await confirmAction({
+      eyebrow: "文件隐私",
+      title: "将文档上传到 OpenAI？",
+      description: "这些文件将离开本机，由 OpenAI 官方 API 读取并作为当前消息的上下文。",
+      detail: "可能产生 OpenAI API 费用。ChatSwitch 会在本次请求结束后请求删除临时上传的文件。",
+      confirmLabel: "上传并发送",
+      tone: "neutral",
+    });
+    if (!confirmed) return;
+    if (state.provider !== confirmedProviderId || !usesNativeOpenAIFileInputs()) {
+      showDiagnostic("连接已变化，请重新确认文件上传。", true);
+      return;
+    }
+  }
+  if (documentAttachments.length && !nativeOpenAIFiles) {
     try {
-      const extracted = await api.extractFileText(attachments.filter((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath)));
+      const extracted = await api.extractFileText(documentAttachments);
       const context = extracted.map((file) => "\n\n[文件：" + file.fileName + "]\n" + file.content + "\n[/文件]").join("");
       prompt = (parsedPrompt + context).trim();
     } catch (error) {
@@ -3810,6 +3836,7 @@ async function sendMessage(_deliveryMode = "auto") {
       skillInputs,
       imageInputs: attachments.filter((filePath) => /\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, detail: "auto" })),
       fileInputs: attachments.filter((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, fileName: filePath.split(/[\\\\/]/).pop() })),
+      fileHandling: nativeOpenAIFiles ? "openai" : "local",
       webSearch: state.webSearchEnabled,
       cwd: workspace,
       clientUserMessageId,
@@ -3889,6 +3916,7 @@ async function sendMessage(_deliveryMode = "auto") {
       skillInputs,
       imageInputs: attachments.filter((filePath) => /\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, detail: "auto" })),
       fileInputs: attachments.filter((filePath) => !/\.(?:gif|jpe?g|png|webp)$/i.test(filePath)).map((filePath) => ({ path: filePath, fileName: filePath.split(/[\\\\/]/).pop() })),
+      fileHandling: nativeOpenAIFiles ? "openai" : "local",
       webSearch: state.webSearchEnabled,
       cwd: workspace,
       clientUserMessageId,

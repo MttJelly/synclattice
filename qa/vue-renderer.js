@@ -13,6 +13,7 @@ const accountUsageScreenshot = path.join(artifactRoot, "vue-renderer-account-usa
 const compactScreenshot = path.join(artifactRoot, "vue-renderer-compact.png");
 const conversationScreenshot = path.join(artifactRoot, "vue-renderer-conversation.png");
 const attachmentScreenshot = path.join(artifactRoot, "vue-renderer-attachment.png");
+const openAIFileScreenshot = path.join(artifactRoot, "vue-renderer-openai-file.png");
 const localHistoryScreenshot = path.join(artifactRoot, "vue-renderer-local-history.png");
 const filePreviewScreenshot = path.join(artifactRoot, "vue-renderer-file-preview.png");
 const localProviderScreenshot = path.join(artifactRoot, "vue-renderer-local-providers.png");
@@ -184,6 +185,7 @@ async function run() {
   const connectRequests = [];
   const startThreadRequests = [];
   const startTurnRequests = [];
+  const extractFileTextRequests = [];
   const copiedTexts = [];
   const copiedImages = [];
   const persistedQueues = [];
@@ -542,6 +544,15 @@ async function run() {
     kind: "text",
     content: "ChatSwitch 文件预览测试\n不会调用系统默认程序。",
   }));
+  ipcMain.handle("file:extract-text", (_event, targets) => {
+    extractFileTextRequests.push(structuredClone(targets));
+    return (targets || []).map((target) => ({
+      filePath: target,
+      fileName: path.basename(target),
+      content: "本地提取的文件内容",
+      truncated: false,
+    }));
+  });
   ipcMain.handle("file:open", () => ({ opened: true }));
   ipcMain.handle("local-history:sources", () => ([
     { id: "codex", label: "Codex", description: "Codex CLI 与桌面客户端", available: true },
@@ -1490,6 +1501,107 @@ async function run() {
       reactiveCountAfterRemove: ChatSwitchVueRuntime.attachmentUi.items.length,
     };
   })()`));
+  const nativeDocument = path.join(profileRoot, "openai-native-file.pdf");
+  fs.writeFileSync(nativeDocument, "%PDF-1.4\nUI fixture", "utf8");
+  const nativeFileStartOffset = startTurnRequests.length;
+  const nativeFileExtractOffset = extractFileTextRequests.length;
+  const openAIFile = await window.webContents.executeJavaScript(`(async () => {
+    const provider = {
+      id: 'openai-files-fixture',
+      type: 'relay',
+      brand: 'openai',
+      preset: 'openai',
+      protocol: 'responses',
+      nativeFileInputs: true,
+      label: 'OpenAI API',
+      connectionLabel: 'OpenAI API',
+      model: 'gpt-5.4',
+      baseUrl: 'https://api.openai.com/v1',
+    };
+    if (!state.providers.some((item) => item.id === provider.id)) state.providers.push(provider);
+    window.__qaFileOriginalProvider = {
+      provider: state.provider,
+      providerType: state.providerType,
+      providerEngine: state.providerEngine,
+      modelProvider: state.modelProvider,
+      activeThread: state.activeThread,
+      threadResumed: state.threadResumed,
+    };
+    state.runningThreads.clear();
+    state.provider = provider.id;
+    state.providerType = 'relay';
+    state.providerEngine = 'openai-compatible';
+    state.modelProvider = provider.id;
+    state.activeThread ||= { id: 'openai-file-ui-thread', name: '文件输入测试', cwd: 'F:\\\\codepro', turns: [] };
+    state.threadResumed = true;
+    setConnected(true, provider.label);
+    elements.input.value = '逐页介绍这个文件';
+    state.pendingAttachments = [${JSON.stringify(nativeDocument)}];
+    renderAttachments();
+    resizeComposer();
+    window.__qaOpenAIFileSend = sendMessage();
+    const started = Date.now();
+    while (document.querySelector('#confirmation-overlay').classList.contains('hidden')) {
+      if (Date.now() - started > 3000) throw new Error('OpenAI file confirmation did not open.');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return {
+      nativeLabel: document.querySelector('#attachment-list .attachment-item small')?.textContent || '',
+      confirmationTitle: document.querySelector('#confirmation-title').textContent,
+      confirmationDetail: document.querySelector('#confirmation-detail').textContent,
+      neutralTone: document.querySelector('.app-confirm-dialog').classList.contains('tone-neutral'),
+    };
+  })()`);
+  fs.writeFileSync(openAIFileScreenshot, (await capturePageWithRetry(window)).toPNG());
+  Object.assign(openAIFile, await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('#confirmation-cancel').click();
+    await window.__qaOpenAIFileSend;
+    const cancelled = {
+      cancelInput: elements.input.value,
+      cancelAttachments: [...state.pendingAttachments],
+    };
+    window.__qaOpenAIFileSend = sendMessage();
+    const started = Date.now();
+    while (document.querySelector('#confirmation-overlay').classList.contains('hidden')) {
+      if (Date.now() - started > 3000) throw new Error('OpenAI file confirmation did not reopen.');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    document.querySelector('#confirmation-confirm').click();
+    await window.__qaOpenAIFileSend;
+    state.runningThreads.clear();
+
+    state.provider = 'deepseek-fixture';
+    state.providerType = 'relay';
+    state.providerEngine = 'openai-compatible';
+    state.modelProvider = 'deepseek';
+    elements.input.value = '读取本地文件';
+    state.pendingAttachments = [${JSON.stringify(nativeDocument)}];
+    renderAttachments();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const localLabel = document.querySelector('#attachment-list .attachment-item small')?.textContent || '';
+    const localOverlayBefore = !document.querySelector('#confirmation-overlay').classList.contains('hidden');
+    await sendMessage();
+    state.runningThreads.clear();
+
+    const original = window.__qaFileOriginalProvider;
+    state.provider = original.provider;
+    state.providerType = original.providerType;
+    state.providerEngine = original.providerEngine;
+    state.modelProvider = original.modelProvider;
+    state.activeThread = original.activeThread;
+    state.threadResumed = original.threadResumed;
+    state.pendingAttachments = [];
+    elements.input.value = '';
+    renderAttachments();
+    return {
+      ...cancelled,
+      localLabel,
+      localOverlayBefore,
+      overlayHidden: document.querySelector('#confirmation-overlay').classList.contains('hidden'),
+    };
+  })()`));
+  openAIFile.startRequests = structuredClone(startTurnRequests.slice(nativeFileStartOffset));
+  openAIFile.extractRequests = structuredClone(extractFileTextRequests.slice(nativeFileExtractOffset));
   await window.webContents.executeJavaScript("(async () => { await openLocalHistoryDialog(); await openLocalHistoryConversation(state.localHistoryConversations[0]); })()");
   await new Promise((resolve) => setTimeout(resolve, 100));
   fs.writeFileSync(localHistoryScreenshot, (await capturePageWithRetry(window)).toPNG());
@@ -2075,7 +2187,7 @@ async function run() {
   assert.equal(attachments.count, 2);
   assert.equal(attachments.reactiveCount, 2);
   assert.equal(attachments.filename, "vue-renderer-conversation.png");
-  assert.deepEqual(attachments.typeLabels, ["图片附件", "文档附件"]);
+  assert.deepEqual(attachments.typeLabels, ["图片附件", "本地提取文本"]);
   assert.equal(attachments.ignoredMessage, "已从剪贴板添加 1 个附件。");
   assert.equal(attachments.overlayVisible, true);
   assert.equal(attachments.overlayCleared, true);
@@ -2089,6 +2201,23 @@ async function run() {
   ]);
   assert.equal(attachments.countAfterRemove, 1);
   assert.equal(attachments.reactiveCountAfterRemove, 1);
+  assert.equal(openAIFile.nativeLabel, "将上传至 OpenAI");
+  assert.match(openAIFile.confirmationTitle, /上传到 OpenAI/);
+  assert.match(openAIFile.confirmationDetail, /API 费用/);
+  assert.equal(openAIFile.neutralTone, true);
+  assert.equal(openAIFile.cancelInput, "逐页介绍这个文件");
+  assert.deepEqual(openAIFile.cancelAttachments, [nativeDocument]);
+  assert.equal(openAIFile.localLabel, "本地提取文本");
+  assert.equal(openAIFile.localOverlayBefore, false);
+  assert.equal(openAIFile.overlayHidden, true);
+  assert.equal(openAIFile.startRequests.length, 2);
+  assert.equal(openAIFile.startRequests[0].fileHandling, "openai");
+  assert.equal(openAIFile.startRequests[0].text, "逐页介绍这个文件");
+  assert.equal(openAIFile.startRequests[0].fileInputs[0].path, nativeDocument);
+  assert.equal(openAIFile.startRequests[1].fileHandling, "local");
+  assert.match(openAIFile.startRequests[1].text, /本地提取的文件内容/);
+  assert.equal(openAIFile.extractRequests.length, 1);
+  assert.deepEqual(openAIFile.extractRequests[0], [nativeDocument]);
   assert.deepEqual({ visible: localHistory.visible, sources: localHistory.sources, conversations: localHistory.conversations, messages: localHistory.messages }, { visible: true, sources: 2, conversations: 2, messages: 3 });
   assert.equal(localHistory.title, "本地记录功能迭代");
   assert.match(localHistory.readOnlyNotice, /只读浏览原始会话/);
@@ -2202,6 +2331,7 @@ async function run() {
     deliveryModes,
     restartRecovery,
     attachments,
+    openAIFile,
     localHistory,
     filePreview,
     localProviders,
@@ -2217,7 +2347,7 @@ async function run() {
     windowThemeRequests,
     interactiveLayoutAudits,
     errors,
-    screenshots: [accountUsageScreenshot, lightDesktopScreenshot, desktopScreenshot, compactScreenshot, conversationScreenshot, confirmationScreenshot, attachmentScreenshot, localHistoryScreenshot, filePreviewScreenshot, localProviderScreenshot, usageScreenshot, usageCompactScreenshot, backupScreenshot, syncScreenshot, appSettingsScreenshot, importPreviewScreenshot, healthScreenshot, extensionsScreenshot, skillInstallScreenshot, darkExtensionsScreenshot],
+    screenshots: [accountUsageScreenshot, lightDesktopScreenshot, desktopScreenshot, compactScreenshot, conversationScreenshot, confirmationScreenshot, attachmentScreenshot, openAIFileScreenshot, localHistoryScreenshot, filePreviewScreenshot, localProviderScreenshot, usageScreenshot, usageCompactScreenshot, backupScreenshot, syncScreenshot, appSettingsScreenshot, importPreviewScreenshot, healthScreenshot, extensionsScreenshot, skillInstallScreenshot, darkExtensionsScreenshot],
   }));
   window.destroy();
   app.quit();

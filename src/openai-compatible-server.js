@@ -2,6 +2,11 @@ const { EventEmitter } = require("node:events");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const {
+  isNativeOpenAIFileProvider,
+  openAIFileEndpoint,
+  validateOpenAIFileInput,
+} = require("./openai-file-inputs");
 
 const IMAGE_MIME_TYPES = {
   ".gif": "image/gif",
@@ -136,6 +141,24 @@ function responsesInput(messages) {
       })
       : message.content,
   }));
+}
+
+function responsesInputWithFiles(messages, fileIds = [], appendUser = false) {
+  const input = responsesInput(messages);
+  if (!fileIds.length) return input;
+  const latestUser = appendUser
+    ? { role: "user", content: [] }
+    : [...input].reverse().find((message) => message.role === "user");
+  if (appendUser) input.push(latestUser);
+  if (!latestUser) throw new Error("文件输入缺少对应的用户消息。");
+  const existing = Array.isArray(latestUser.content)
+    ? latestUser.content
+    : latestUser.content ? [{ type: "input_text", text: latestUser.content }] : [];
+  latestUser.content = [
+    ...fileIds.map((fileId) => ({ type: "input_file", file_id: fileId })),
+    ...existing,
+  ];
+  return input;
 }
 
 function responseAnnotations(payload) {
@@ -463,6 +486,39 @@ function providerRequestId(response) {
   return null;
 }
 
+async function uploadOpenAIFile(fetchImpl, provider, fileInput, signal) {
+  if (!isNativeOpenAIFileProvider(provider)) {
+    throw new Error("当前连接不支持 OpenAI 官方文件输入。");
+  }
+  const file = validateOpenAIFileInput(fileInput);
+  const form = new FormData();
+  form.append("purpose", "user_data");
+  form.append("file", new Blob([fs.readFileSync(file.path)], { type: file.mimeType }), file.fileName);
+  const response = await fetchImpl(openAIFileEndpoint(provider.baseUrl), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${provider.apiKey}` },
+    body: form,
+    signal,
+  });
+  if (!response.ok) throw responseError(response.status, response.statusText, await response.text());
+  const payload = await response.json();
+  const id = String(payload?.id || "").trim();
+  if (!id) throw new Error(`OpenAI 没有返回文件 ID：${file.fileName}`);
+  return { id, fileName: file.fileName };
+}
+
+async function deleteOpenAIFile(fetchImpl, provider, fileId) {
+  try {
+    const response = await fetchImpl(`${openAIFileEndpoint(provider.baseUrl)}/${encodeURIComponent(fileId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${provider.apiKey}` },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 function completionError(code, message, details = {}) {
   const error = new Error(message);
   error.code = code;
@@ -760,6 +816,7 @@ class OpenAICompatibleServer extends EventEmitter {
     const prompt = String(text || "").trim();
     const imageInputs = Array.isArray(options.imageInputs) ? options.imageInputs : [];
     const fileInputs = Array.isArray(options.fileInputs) ? options.fileInputs : [];
+    const nativeFileInputs = options.fileHandling === "openai" ? fileInputs : [];
     if (!prompt && !imageInputs.length && !fileInputs.length) return Promise.reject(new Error("消息内容不能为空。"));
     let thread;
     try {
@@ -818,14 +875,16 @@ class OpenAICompatibleServer extends EventEmitter {
     this.emit("notification", { method: "item/started", params: { threadId, turnId, item: userItem } });
     this.emit("notification", { method: "item/completed", params: { threadId, turnId, item: userItem } });
     this.emit("notification", { method: "item/started", params: { threadId, turnId, item: assistantItem } });
-    this.executeTurn(thread, turn, assistantItem, reasoningItem, imageInputs, controller).catch((error) => {
+    this.executeTurn(thread, turn, assistantItem, reasoningItem, imageInputs, nativeFileInputs, controller).catch((error) => {
       this.finishTurn(thread, turn, assistantItem, reasoningItem, error?.name === "AbortError" ? "interrupted" : "failed", error);
     });
     return Promise.resolve({ turn: { id: turnId, status: "inProgress" } });
   }
 
-  async executeTurn(thread, turn, assistantItem, reasoningItem, imageInputs, controller) {
-    const configuredProviders = [this.provider, ...this.fallbackProviders];
+  async executeTurn(thread, turn, assistantItem, reasoningItem, imageInputs, fileInputs, controller) {
+    const requiresNativeFiles = fileInputs.length > 0 && isNativeOpenAIFileProvider(this.provider);
+    const configuredProviders = [this.provider, ...this.fallbackProviders]
+      .filter((provider) => !requiresNativeFiles || isNativeOpenAIFileProvider(provider));
     const now = Date.now();
     const availableProviders = configuredProviders.filter((provider) => (
       (this.providerHealth.get(provider.id)?.openUntil || 0) <= now
@@ -854,6 +913,7 @@ class OpenAICompatibleServer extends EventEmitter {
           assistantItem,
           reasoningItem,
           imageInputs,
+          requiresNativeFiles ? fileInputs : [],
           controller,
         );
         this.providerHealth.set(provider.id, {
@@ -893,9 +953,27 @@ class OpenAICompatibleServer extends EventEmitter {
     throw lastError || new Error("没有可用的模型连接。");
   }
 
-  async executeProviderTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, controller) {
+  async executeProviderTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, fileInputs, controller) {
     if ((provider.protocol || "chat_completions") === "responses") {
-      return this.executeResponsesTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, controller);
+      const uploadedFiles = [];
+      try {
+        for (const fileInput of fileInputs) {
+          uploadedFiles.push(await uploadOpenAIFile(this.fetchImpl, provider, fileInput, controller.signal));
+        }
+        return await this.executeResponsesTurn(
+          provider,
+          model,
+          thread,
+          turn,
+          assistantItem,
+          reasoningItem,
+          imageInputs,
+          uploadedFiles.map((file) => file.id),
+          controller,
+        );
+      } finally {
+        await Promise.all(uploadedFiles.map((file) => deleteOpenAIFile(this.fetchImpl, provider, file.id)));
+      }
     }
     const response = await this.fetchImpl(chatCompletionsEndpoint(provider.baseUrl), {
       method: "POST",
@@ -993,7 +1071,9 @@ class OpenAICompatibleServer extends EventEmitter {
     }
   }
 
-  async executeResponsesTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, controller) {
+  async executeResponsesTurn(provider, model, thread, turn, assistantItem, reasoningItem, imageInputs, fileIds, controller) {
+    const currentUserItem = (turn.items || []).find((item) => item.type === "userMessage");
+    const appendFileOnlyUser = fileIds.length > 0 && !textFromUserItem(currentUserItem);
     const response = await this.fetchImpl(responsesEndpoint(provider.baseUrl), {
       method: "POST",
       headers: {
@@ -1003,7 +1083,7 @@ class OpenAICompatibleServer extends EventEmitter {
       },
       body: JSON.stringify({
         model,
-        input: responsesInput(messagesForThread(thread, imageInputs)),
+        input: responsesInputWithFiles(messagesForThread(thread, imageInputs), fileIds, appendFileOnlyUser),
         stream: true,
         store: false,
         ...(turn.effort ? { reasoning: { effort: turn.effort } } : {}),
@@ -1216,7 +1296,9 @@ module.exports = {
   OpenAICompatibleServer,
   chatCompletionsEndpoint,
   responsesEndpoint,
+  responsesInputWithFiles,
   responseOutput,
+  uploadOpenAIFile,
   consumeSse,
   messagesForThread,
   parseCodexThreadFile,

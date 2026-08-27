@@ -613,7 +613,7 @@ export function render(_ctx, _cache) {
             _createElementVNode("span", null, "API 协议"),
             _createElementVNode("select", { name: "protocol" }, [
               _createElementVNode("option", { value: "chat_completions" }, "OpenAI Chat Completions"),
-              _createElementVNode("option", { value: "responses" }, "OpenAI Responses（Codex 代理）")
+              _createElementVNode("option", { value: "responses" }, "OpenAI Responses")
             ])
           ]),
           _createElementVNode("label", null, [

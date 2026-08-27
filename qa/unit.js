@@ -40,11 +40,20 @@ const {
   OpenAICompatibleServer,
   chatCompletionsEndpoint,
   responsesEndpoint,
+  responsesInputWithFiles,
   responseOutput,
   importedLocalThread,
   parseCodexThreadFile,
   parseSseBlock,
 } = require("../src/openai-compatible-server");
+const {
+  MAX_OPENAI_FILE_BYTES,
+  OPENAI_FILE_MIME_TYPES,
+  isNativeOpenAIFileProvider,
+  openAIFileEndpoint,
+  validateOpenAIFileInput,
+} = require("../src/openai-file-inputs");
+const { extractAttachmentText } = require("../src/attachment-text");
 const { explicitBoolean, fetchRelayBalance } = require("../src/relay-balance");
 const {
   rewriteSearchTool,
@@ -65,6 +74,10 @@ const {
   requireAuthenticatedOfficialSnapshot,
 } = require("../src/openai-auth");
 const { normalizeRateLimits, normalizeAccountUsage } = require("../src/openai-account-usage");
+const { extractOfficeText } = require("../src/office-text");
+const { extractPdfText } = require("../src/pdf-text");
+const { threadExportContent, writeThreadExportFile } = require("../src/thread-export");
+const { strToU8, zipSync } = require("fflate");
 const {
   buildContinuationPrompt,
   mergeLogicalThread,
@@ -1607,6 +1620,408 @@ async function testOpenAICompatibleResponses() {
   }
 }
 
+async function testOpenAINativeFileInputs() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-openai-files-"));
+  const document = path.join(root, "fixture.pdf");
+  const calls = [];
+  try {
+    fs.writeFileSync(document, "%PDF-1.4\nfixture", "utf8");
+    const provider = {
+      id: "openai-files-unit",
+      label: "OpenAI files unit",
+      type: "relay",
+      engine: "openai-compatible",
+      protocol: "responses",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-5.4",
+      apiKey: "openai-unit-key",
+      codexHome: root,
+    };
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, options });
+      if (url === "https://api.openai.com/v1/files" && options.method === "POST") {
+        assert.equal(options.headers.Authorization, "Bearer openai-unit-key");
+        assert.equal(options.headers["Content-Type"], undefined);
+        assert.equal(options.body instanceof FormData, true);
+        assert.equal(options.body.get("purpose"), "user_data");
+        assert.equal(options.body.get("file").name, "fixture.pdf");
+        return new Response(JSON.stringify({ id: "file_unit_123" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url === "https://api.openai.com/v1/responses" && options.method === "POST") {
+        const body = JSON.parse(options.body);
+        assert.deepEqual(body.input.at(-1), {
+          role: "user",
+          content: [
+            { type: "input_file", file_id: "file_unit_123" },
+            { type: "input_text", text: "逐页介绍这个文件" },
+          ],
+        });
+        return new Response(JSON.stringify({
+          status: "completed",
+          output: [{ type: "message", content: [{ type: "output_text", text: "文件已读取" }] }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url === "https://api.openai.com/v1/files/file_unit_123" && options.method === "DELETE") {
+        return new Response(JSON.stringify({ deleted: true }), { status: 200 });
+      }
+      throw new Error(`Unexpected OpenAI file request: ${options.method} ${url}`);
+    };
+    const server = new OpenAICompatibleServer(provider, fetchImpl);
+    await server.start();
+    const threadId = (await server.startThread("F:\\codepro", provider.model)).thread.id;
+    const completed = new Promise((resolve) => {
+      const listener = (message) => {
+        if (message.method !== "turn/completed") return;
+        server.off("notification", listener);
+        resolve(message.params.turn);
+      };
+      server.on("notification", listener);
+    });
+    await server.startTurn(threadId, "逐页介绍这个文件", "F:\\codepro", null, {
+      fileInputs: [{ path: document, fileName: "fixture.pdf" }],
+      fileHandling: "openai",
+    });
+    assert.equal((await completed).status, "completed");
+    assert.deepEqual(calls.map((call) => `${call.options.method} ${call.url}`), [
+      "POST https://api.openai.com/v1/files",
+      "POST https://api.openai.com/v1/responses",
+      "DELETE https://api.openai.com/v1/files/file_unit_123",
+    ]);
+
+    const failingCalls = [];
+    const failingServer = new OpenAICompatibleServer({ ...provider, codexHome: path.join(root, "failure") }, async (url, options) => {
+      failingCalls.push(`${options.method} ${url}`);
+      return new Response('{"error":{"message":"upload denied"}}', { status: 403, statusText: "Forbidden" });
+    });
+    await failingServer.start();
+    const failingThreadId = (await failingServer.startThread("F:\\codepro", provider.model)).thread.id;
+    const failed = new Promise((resolve) => {
+      const listener = (message) => {
+        if (message.method !== "turn/completed") return;
+        failingServer.off("notification", listener);
+        resolve(message.params.turn);
+      };
+      failingServer.on("notification", listener);
+    });
+    await failingServer.startTurn(failingThreadId, "读取", "F:\\codepro", null, {
+      fileInputs: [{ path: document, fileName: "fixture.pdf" }],
+      fileHandling: "openai",
+    });
+    assert.equal((await failed).status, "failed");
+    assert.deepEqual(failingCalls, ["POST https://api.openai.com/v1/files"]);
+
+    const responseFailureCalls = [];
+    const responseFailureServer = new OpenAICompatibleServer({ ...provider, codexHome: path.join(root, "response-failure") }, async (url, options) => {
+      responseFailureCalls.push(`${options.method} ${url}`);
+      if (url === "https://api.openai.com/v1/files" && options.method === "POST") {
+        return new Response(JSON.stringify({ id: "file_cleanup_456" }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url === "https://api.openai.com/v1/responses" && options.method === "POST") {
+        return new Response('{"error":{"message":"model failed"}}', { status: 500, statusText: "Internal Server Error" });
+      }
+      if (url === "https://api.openai.com/v1/files/file_cleanup_456" && options.method === "DELETE") {
+        return new Response(JSON.stringify({ deleted: true }), { status: 200 });
+      }
+      throw new Error(`Unexpected cleanup request: ${options.method} ${url}`);
+    });
+    await responseFailureServer.start();
+    const responseFailureThreadId = (await responseFailureServer.startThread("F:\\codepro", provider.model)).thread.id;
+    const responseFailed = new Promise((resolve) => {
+      const listener = (message) => {
+        if (message.method !== "turn/completed") return;
+        responseFailureServer.off("notification", listener);
+        resolve(message.params.turn);
+      };
+      responseFailureServer.on("notification", listener);
+    });
+    await responseFailureServer.startTurn(responseFailureThreadId, "读取", "F:\\codepro", null, {
+      fileInputs: [{ path: document, fileName: "fixture.pdf" }],
+      fileHandling: "openai",
+    });
+    assert.equal((await responseFailed).status, "failed");
+    assert.deepEqual(responseFailureCalls, [
+      "POST https://api.openai.com/v1/files",
+      "POST https://api.openai.com/v1/responses",
+      "DELETE https://api.openai.com/v1/files/file_cleanup_456",
+    ]);
+
+    assert.equal(isNativeOpenAIFileProvider(provider), true);
+    assert.equal(isNativeOpenAIFileProvider({ ...provider, baseUrl: "https://relay.example/v1" }), false);
+    assert.equal(isNativeOpenAIFileProvider({ ...provider, protocol: "chat_completions" }), false);
+    assert.equal(openAIFileEndpoint("https://api.openai.com/v1/responses"), "https://api.openai.com/v1/files");
+    assert.equal(validateOpenAIFileInput({ path: document }).size, fs.statSync(document).size);
+    assert.equal(MAX_OPENAI_FILE_BYTES, 50 * 1024 * 1024);
+    assert.deepEqual(responsesInputWithFiles([{ role: "user", content: "分析" }], ["file_a"]), [{
+      role: "user",
+      content: [{ type: "input_file", file_id: "file_a" }, { type: "input_text", text: "分析" }],
+    }]);
+    const store = new ProviderStore();
+    store.importConfiguration({
+      schema: "chatswitch-config",
+      version: 1,
+      relays: [{
+        label: "OpenAI native file fixture",
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-5.4",
+        protocol: "responses",
+        preset: "openai",
+        discoveredModels: ["gpt-5.4"],
+      }],
+      providerSettings: {},
+      projects: [],
+      pricing: [],
+      routes: [],
+      disabledSkills: [],
+      prompts: [],
+      mcpServers: [],
+    });
+    const publicProvider = store.list().find((item) => item.label === "OpenAI native file fixture");
+    assert.equal(publicProvider.nativeFileInputs, true);
+    store.removeConnection(publicProvider.id);
+    const unsupported = path.join(root, "fixture.exe");
+    fs.writeFileSync(unsupported, "fixture", "utf8");
+    assert.throws(() => validateOpenAIFileInput({ path: unsupported }), /不支持此格式/);
+    const oversized = path.join(root, "oversized.pdf");
+    fs.writeFileSync(oversized, "", "utf8");
+    fs.truncateSync(oversized, MAX_OPENAI_FILE_BYTES + 1);
+    assert.throws(() => validateOpenAIFileInput({ path: oversized }), /50 MB/);
+    server.stop();
+    failingServer.stop();
+    responseFailureServer.stop();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function minimalPdf(text) {
+  const escaped = String(text).replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+  const stream = `BT\n/F1 16 Tf\n72 720 Td\n(${escaped}) Tj\nET`;
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+    `4 0 obj\n<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream\nendobj\n`,
+    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(source, "ascii"));
+    source += object;
+  }
+  const xrefOffset = Buffer.byteLength(source, "ascii");
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  source += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, "ascii");
+}
+
+async function testPdfExtractionAndThreadExport() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-pdf-unit-"));
+  const file = path.join(root, "fixture.pdf");
+  try {
+    fs.writeFileSync(file, minimalPdf("CHATSWITCH PDF TEXT"));
+    const extracted = await extractPdfText(file);
+    assert.match(extracted.text, /CHATSWITCH PDF TEXT/);
+    assert.equal(extracted.pages, 1);
+    assert.equal(extracted.truncated, false);
+
+    const thread = {
+      id: "thread-export-unit",
+      name: "Export <fixture>",
+      turns: [{
+        items: [
+          { type: "userMessage", content: [{ type: "text", text: "第一行" }, { type: "text", text: "第二行" }] },
+          { type: "reasoning", summary: [{ type: "summary_text", text: "推理摘要" }] },
+          { type: "agentMessage", text: "结果 & 完成" },
+        ],
+      }],
+    };
+    const exported = threadExportContent(thread);
+    assert.equal(JSON.parse(exported.json).id, thread.id);
+    assert.equal(exported.json.endsWith("\n"), true);
+    assert.equal(exported.json.endsWith("\\n"), false);
+    assert.match(exported.markdown, /# Export <fixture>\n\n## 用户\n\n第一行\n第二行/);
+    assert.doesNotMatch(exported.markdown, /\\n/);
+    assert.match(exported.html, /Export &lt;fixture&gt;/);
+    assert.match(exported.html, /结果 &amp; 完成/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function officeFixture(entries) {
+  return Buffer.from(zipSync(Object.fromEntries(Object.entries(entries).map(([name, content]) => [name, strToU8(content)]))));
+}
+
+function testOfficeMultiSectionExtraction() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-office-unit-"));
+  const spreadsheet = path.join(root, "multi-sheet.xlsx");
+  const presentation = path.join(root, "multi-slide.pptx");
+  try {
+    fs.writeFileSync(spreadsheet, officeFixture({
+      "xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="数据一" r:id="rId1"/><sheet name="数据二" r:id="rId2"/></sheets></workbook>`,
+      "xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`,
+      "xl/sharedStrings.xml": `<?xml version="1.0"?><sst><si><t>SHEET_ONE_TEXT</t></si><si><r><t>SHEET_TWO_TEXT</t></r></si></sst>`,
+      "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>`,
+      "xl/worksheets/sheet2.xml": `<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1" t="s"><v>1</v></c><c r="B1"><v>987654321</v></c></row></sheetData></worksheet>`,
+    }));
+    const workbook = extractOfficeText(spreadsheet);
+    assert.equal(workbook.sections, 2);
+    assert.match(workbook.text, /\[工作表：数据一\][\s\S]*A1=SHEET_ONE_TEXT/);
+    assert.match(workbook.text, /\[工作表：数据二\][\s\S]*A1=SHEET_TWO_TEXT[\s\S]*B1=987654321/);
+
+    fs.writeFileSync(presentation, officeFixture({
+      "ppt/presentation.xml": `<?xml version="1.0"?><p:presentation xmlns:p="urn:p" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId r:id="rId1"/><p:sldId r:id="rId2"/></p:sldIdLst></p:presentation>`,
+      "ppt/_rels/presentation.xml.rels": `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="slides/slide1.xml"/><Relationship Id="rId2" Target="slides/slide2.xml"/></Relationships>`,
+      "ppt/slides/slide1.xml": `<?xml version="1.0"?><p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>SLIDE_ONE_TEXT</a:t></a:r></a:p></p:sld>`,
+      "ppt/slides/slide2.xml": `<?xml version="1.0"?><p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>SLIDE_TWO_TEXT</a:t></a:r></a:p><a:p><a:r><a:t>SECOND_PARAGRAPH</a:t></a:r></a:p></p:sld>`,
+    }));
+    const slides = extractOfficeText(presentation);
+    assert.equal(slides.sections, 2);
+    assert.match(slides.text, /\[第 1 张幻灯片\][\s\S]*SLIDE_ONE_TEXT/);
+    assert.match(slides.text, /\[第 2 张幻灯片\][\s\S]*SLIDE_TWO_TEXT[\s\S]*SECOND_PARAGRAPH/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testAttachmentFormatMatrixAndExports() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-attachment-matrix-unit-"));
+  const thread = {
+    id: "attachment-export-unit",
+    name: "附件导出 <fixture>",
+    turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "请读取附件" }] }, { type: "agentMessage", text: "已完成" }] }],
+  };
+  try {
+    const textFixtures = {
+      ".txt": "纯文本附件",
+      ".md": "# Markdown 附件",
+      ".csv": "name,value\nfixture,42",
+      ".json": '{"fixture":true,"value":42}',
+    };
+    for (const [extension, content] of Object.entries(textFixtures)) {
+      const file = path.join(root, `fixture${extension}`);
+      fs.writeFileSync(file, `\uFEFF${content}`, "utf8");
+      const extracted = await extractAttachmentText(file);
+      assert.equal(extracted.text, content);
+      assert.equal(extracted.truncated, false);
+    }
+
+    const pdf = path.join(root, "fixture.pdf");
+    fs.writeFileSync(pdf, minimalPdf("PDF_ATTACHMENT_TEXT"));
+    const pdfResult = await extractAttachmentText(pdf);
+    assert.match(pdfResult.text, /PDF_ATTACHMENT_TEXT/);
+    assert.equal(pdfResult.pages, 1);
+
+    const docx = path.join(root, "fixture.docx");
+    fs.writeFileSync(docx, officeFixture({
+      "word/document.xml": `<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>DOCX_FIRST_PARAGRAPH</w:t></w:r></w:p><w:p><w:r><w:t>DOCX_SECOND_PARAGRAPH</w:t></w:r></w:p></w:body></w:document>`,
+    }));
+    const docxResult = await extractAttachmentText(docx);
+    assert.match(docxResult.text, /DOCX_FIRST_PARAGRAPH[\s\S]*DOCX_SECOND_PARAGRAPH/);
+
+    const spreadsheet = path.join(root, "fixture.xlsx");
+    fs.writeFileSync(spreadsheet, officeFixture({
+      "xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet A" r:id="rId1"/><sheet name="Sheet B" r:id="rId2"/></sheets></workbook>`,
+      "xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>`,
+      "xl/sharedStrings.xml": `<?xml version="1.0"?><sst><si><t>XLSX_FIRST_SHEET</t></si><si><t>XLSX_SECOND_SHEET</t></si></sst>`,
+      "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet><sheetData><row><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>`,
+      "xl/worksheets/sheet2.xml": `<?xml version="1.0"?><worksheet><sheetData><row><c r="A1" t="s"><v>1</v></c></row></sheetData></worksheet>`,
+    }));
+    const xlsxResult = await extractAttachmentText(spreadsheet);
+    assert.equal(xlsxResult.sections, 2);
+    assert.match(xlsxResult.text, /XLSX_FIRST_SHEET[\s\S]*XLSX_SECOND_SHEET/);
+
+    const presentation = path.join(root, "fixture.pptx");
+    fs.writeFileSync(presentation, officeFixture({
+      "ppt/presentation.xml": `<?xml version="1.0"?><p:presentation xmlns:p="urn:p" xmlns:r="urn:r"><p:sldIdLst><p:sldId r:id="rId1"/><p:sldId r:id="rId2"/></p:sldIdLst></p:presentation>`,
+      "ppt/_rels/presentation.xml.rels": `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Target="slides/slide1.xml"/><Relationship Id="rId2" Target="slides/slide2.xml"/></Relationships>`,
+      "ppt/slides/slide1.xml": `<?xml version="1.0"?><p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>PPTX_FIRST_SLIDE</a:t></a:r></a:p></p:sld>`,
+      "ppt/slides/slide2.xml": `<?xml version="1.0"?><p:sld xmlns:p="urn:p" xmlns:a="urn:a"><a:p><a:r><a:t>PPTX_SECOND_SLIDE</a:t></a:r></a:p></p:sld>`,
+    }));
+    const pptxResult = await extractAttachmentText(presentation);
+    assert.equal(pptxResult.sections, 2);
+    assert.match(pptxResult.text, /PPTX_FIRST_SLIDE[\s\S]*PPTX_SECOND_SLIDE/);
+
+    for (const [extension, mimeType] of Object.entries(OPENAI_FILE_MIME_TYPES)) {
+      const file = path.join(root, `upload${extension}`);
+      fs.writeFileSync(file, "fixture", "utf8");
+      assert.equal((validateOpenAIFileInput({ path: file })).mimeType, mimeType);
+    }
+    assert.throws(() => extractAttachmentText(path.join(root, "upload.doc")), /暂不支持/);
+
+    for (const format of ["md", "html", "json"]) {
+      const output = path.join(root, `export.${format}`);
+      const result = await writeThreadExportFile(output, format, thread);
+      assert.equal(result.format, format);
+      assert.ok(fs.statSync(output).size > 0);
+      if (format === "json") assert.equal(JSON.parse(fs.readFileSync(output, "utf8")).id, thread.id);
+      if (format === "md") assert.match(fs.readFileSync(output, "utf8"), /附件导出/);
+      if (format === "html") assert.match(fs.readFileSync(output, "utf8"), /&lt;fixture&gt;/);
+    }
+    const pdfOutput = path.join(root, "export.pdf");
+    await writeThreadExportFile(pdfOutput, "pdf", thread, async (html) => {
+      assert.match(html, /附件导出/);
+      return Buffer.from("%PDF-1.7\nunit-fixture\n", "ascii");
+    });
+    assert.match(fs.readFileSync(pdfOutput, "ascii"), /^%PDF-1\.7/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testAttachmentFailureAndLimitBoundaries() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "chatswitch-attachment-boundary-unit-"));
+  try {
+    const longText = path.join(root, "long.txt");
+    fs.writeFileSync(longText, "0123456789", "utf8");
+    assert.deepEqual(await extractAttachmentText(longText, { maxCharacters: 4 }), {
+      text: "0123",
+      truncated: true,
+      sections: 1,
+    });
+
+    const binaryText = path.join(root, "binary.txt");
+    fs.writeFileSync(binaryText, Buffer.from([0x41, 0x00, 0x42]));
+    assert.throws(() => extractAttachmentText(binaryText), /不是可读文本/);
+
+    const malformedOffice = path.join(root, "malformed.xlsx");
+    fs.writeFileSync(malformedOffice, "not-a-zip", "utf8");
+    assert.throws(() => extractAttachmentText(malformedOffice), /invalid zip data|invalid length|unexpected EOF/i);
+
+    const emptyOffice = path.join(root, "empty.docx");
+    fs.writeFileSync(emptyOffice, officeFixture({ "word/document.xml": `<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body/></w:document>` }));
+    assert.equal((await extractAttachmentText(emptyOffice)).text, "");
+
+    const oldWord = path.join(root, "legacy.doc");
+    fs.writeFileSync(oldWord, "legacy", "utf8");
+    assert.throws(() => extractAttachmentText(oldWord), /暂不支持/);
+    assert.equal(validateOpenAIFileInput({ path: oldWord }).mimeType, "application/msword");
+
+    assert.throws(() => extractAttachmentText(path.join(root, "missing.pdf")), /ENOENT/);
+    const missingUpload = path.join(root, "missing-upload.pdf");
+    assert.throws(() => validateOpenAIFileInput({ path: missingUpload }), /找不到附件/);
+
+    const failedPdf = path.join(root, "failed.pdf");
+    await assert.rejects(
+      () => writeThreadExportFile(failedPdf, "pdf", { name: "失败导出", turns: [] }, async () => { throw new Error("renderer failed"); }),
+      /renderer failed/,
+    );
+    assert.equal(fs.existsSync(failedPdf), false);
+    await assert.rejects(
+      () => writeThreadExportFile(failedPdf, "pdf", { name: "缺少写入器", turns: [] }),
+      /PDF 写入器/,
+    );
+    assert.equal(fs.existsSync(failedPdf), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 async function testResponsesCompatibilityProxy() {
   const attempts = [];
   const fallbacks = [];
@@ -2517,6 +2932,8 @@ function testPersistedMessageQueues() {
     text: "恢复后发送这条消息",
     displayText: "恢复后发送这条消息",
     imageInputs: [{ path: "F:\\codepro\\fixture.png", detail: "original" }],
+    fileInputs: [{ path: "F:\\codepro\\fixture.pdf", fileName: "fixture.pdf" }],
+    fileHandling: "openai",
     skillInputs: [{ name: "fixture", path: "F:\\skills\\fixture\\SKILL.md" }],
     cwd: "F:\\codepro",
     clientUserMessageId: "client-fixture",
@@ -2528,6 +2945,8 @@ function testPersistedMessageQueues() {
   }]);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].imageInputs[0].detail, "auto");
+  assert.deepEqual(saved[0].fileInputs, [{ path: "F:\\codepro\\fixture.pdf", fileName: "fixture.pdf" }]);
+  assert.equal(saved[0].fileHandling, "openai");
   assert.equal(Object.hasOwn(saved[0], "apiKey"), false);
   const restored = new ProviderStore().messageQueues();
   assert.equal(restored[threadId][0].text, "恢复后发送这条消息");
@@ -2683,6 +3102,11 @@ Promise.resolve()
   .then(testClaudeThreadDeletion)
   .then(testOpenAICompatibleStreaming)
   .then(testOpenAICompatibleResponses)
+  .then(testOpenAINativeFileInputs)
+  .then(testPdfExtractionAndThreadExport)
+  .then(testOfficeMultiSectionExtraction)
+  .then(testAttachmentFormatMatrixAndExports)
+  .then(testAttachmentFailureAndLimitBoundaries)
   .then(testResponsesCompatibilityProxy)
   .then(testOpenAICompatibleFailover)
   .then(testOpenAICompatibleCompletionValidation)
@@ -2690,7 +3114,7 @@ Promise.resolve()
   .then(testOpenAICompatibleSharedCodexHistory)
   .then(testImportedLocalConversation)
   .then(testClaudeOfficialAuthSettings)
-  .then(() => console.log(JSON.stringify({ ok: true, tests: 67 })))
+  .then(() => console.log(JSON.stringify({ ok: true, tests: 72 })))
   .catch((error) => {
     console.error(error.stack || error.message);
     process.exitCode = 1;
